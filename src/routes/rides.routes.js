@@ -7,6 +7,21 @@ const router = Router();
 let cachedTheDateDataType = null;
 let cachedDataColumns = null;
 
+function csvCell(value) {
+  const safe = String(value ?? "")
+    .replace(/"/g, '""')
+    .replace(/\r?\n/g, " ");
+  return `"${safe}"`;
+}
+
+function toCsv(rows, columnNames) {
+  const header = columnNames.map((c) => csvCell(c)).join(",");
+  const lines = rows.map((row) => (
+    columnNames.map((c) => csvCell(row[c])).join(",")
+  ));
+  return [header, ...lines].join("\r\n");
+}
+
 async function resolveDataColumns() {
   if (cachedDataColumns) return cachedDataColumns;
 
@@ -310,6 +325,22 @@ router.get("/search", requireAuth, async (req, res) => {
     sortBy: requestedSortBy,
     sortDir: normalizedSortDir.toLowerCase(),
   });
+});
+
+/**
+ * Full CSV backup of data table
+ */
+router.get("/backup.csv", requireAuth, async (_req, res) => {
+  const [columnRows] = await pool.query("SHOW COLUMNS FROM data");
+  const columns = columnRows.map((r) => String(r.Field ?? "")).filter(Boolean);
+
+  const [rows] = await pool.query("SELECT * FROM data");
+  const csv = toCsv(rows, columns);
+  const datePart = new Date().toISOString().slice(0, 10);
+
+  res.setHeader("Content-Type", "text/csv; charset=utf-8");
+  res.setHeader("Content-Disposition", `attachment; filename=\"data_backup_${datePart}.csv\"`);
+  res.status(200).send(`\uFEFF${csv}`);
 });
 
 /**

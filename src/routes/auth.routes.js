@@ -63,4 +63,40 @@ router.get("/me", requireAuth, (req, res) => {
   });
 });
 
+router.post("/change-password", requireAuth, async (req, res) => {
+  const userId = req.user?.userId;
+  const { currentPassword, newPassword } = req.body ?? {};
+
+  if (!userId) return res.status(401).json({ error: "Not authenticated" });
+  if (!currentPassword || !newPassword) {
+    return res.status(400).json({ error: "Missing current/new password" });
+  }
+
+  if (String(newPassword).length < 8) {
+    return res.status(400).json({ error: "New password must be at least 8 characters." });
+  }
+
+  const [rows] = await pool.query(
+    "SELECT id, password_hash FROM users WHERE id = ? LIMIT 1",
+    [userId],
+  );
+  const user = rows?.[0];
+  if (!user) return res.status(404).json({ error: "User not found" });
+
+  const isCurrentValid = await bcrypt.compare(currentPassword, user.password_hash);
+  if (!isCurrentValid) {
+    return res.status(401).json({ error: "Current password is incorrect." });
+  }
+
+  const isSameAsCurrent = await bcrypt.compare(newPassword, user.password_hash);
+  if (isSameAsCurrent) {
+    return res.status(400).json({ error: "New password must be different from current password." });
+  }
+
+  const newHash = await bcrypt.hash(newPassword, 10);
+  await pool.query("UPDATE users SET password_hash = ? WHERE id = ? LIMIT 1", [newHash, userId]);
+
+  res.json({ ok: true });
+});
+
 export default router;
