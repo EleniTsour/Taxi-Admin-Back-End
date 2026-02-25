@@ -87,7 +87,7 @@ router.post("/", requireAuth, async (req, res) => {
   const b = req.body ?? {};
 
   // Minimal required fields
-  const required = ["THE_DATE", "TIME", "TYPE", "FROM", "TO", "THE_NAME"];
+  const required = ["THE_DATE", "FROM", "TO"];
   const missing = required.filter((k) => !String(b[k] ?? "").trim());
   if (missing.length) return res.status(400).json({ error: "Missing required fields", missing });
 
