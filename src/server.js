@@ -12,10 +12,34 @@ dotenv.config();
 
 const app = express();
 
-app.use(cors({
-  origin: process.env.CORS_ORIGIN,
+function normalizeOrigin(origin) {
+  return String(origin ?? "").trim().replace(/\/+$/, "");
+}
+
+const configuredOrigins = String(process.env.CORS_ORIGIN ?? "")
+  .split(",")
+  .map(normalizeOrigin)
+  .filter(Boolean);
+
+const fallbackOrigins = ["http://localhost:5173", "https://versa-reg.eu", "https://www.versa-reg.eu"];
+const allowedOrigins = configuredOrigins.length ? configuredOrigins : fallbackOrigins;
+
+const corsOptions = {
   credentials: true,
-}));
+  origin(origin, callback) {
+    // Allow non-browser clients (no Origin header).
+    if (!origin) return callback(null, true);
+
+    const requestOrigin = normalizeOrigin(origin);
+    if (allowedOrigins.includes(requestOrigin)) {
+      return callback(null, true);
+    }
+
+    return callback(new Error(`CORS blocked for origin: ${origin}`));
+  },
+};
+
+app.use(cors(corsOptions));
 
 app.use(cookieParser());
 app.use(express.json({ limit: "1mb" }));
@@ -33,6 +57,10 @@ app.use((req, res) => {
 
 app.use((err, req, res, next) => {
   console.error(err);
+
+  if (String(err?.message || "").startsWith("CORS blocked for origin:")) {
+    return res.status(403).json({ error: err.message });
+  }
 
   const isDbError =
     err?.code === "ECONNREFUSED" ||
