@@ -13,7 +13,9 @@ dotenv.config();
 const app = express();
 
 function normalizeOrigin(origin) {
-  return String(origin ?? "").trim().replace(/\/+$/, "");
+  const raw = String(origin ?? "").trim();
+  const unquoted = raw.replace(/^['"]+|['"]+$/g, "");
+  return unquoted.replace(/\/+$/, "");
 }
 
 const configuredOrigins = String(process.env.CORS_ORIGIN ?? "")
@@ -22,10 +24,12 @@ const configuredOrigins = String(process.env.CORS_ORIGIN ?? "")
   .filter(Boolean);
 
 const fallbackOrigins = ["http://localhost:5173", "https://versa-reg.eu", "https://www.versa-reg.eu"];
-const allowedOrigins = configuredOrigins.length ? configuredOrigins : fallbackOrigins;
+const allowedOrigins = [...new Set([...fallbackOrigins, ...configuredOrigins])];
 
 const corsOptions = {
   credentials: true,
+  methods: ["GET", "HEAD", "PUT", "PATCH", "POST", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
   origin(origin, callback) {
     // Allow non-browser clients (no Origin header).
     if (!origin) return callback(null, true);
@@ -40,6 +44,7 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
+app.options(/.*/, cors(corsOptions));
 
 app.use(cookieParser());
 app.use(express.json({ limit: "1mb" }));
