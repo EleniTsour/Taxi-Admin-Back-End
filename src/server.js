@@ -2,13 +2,17 @@ import express from "express";
 import dotenv from "dotenv";
 import cors from "cors";
 import cookieParser from "cookie-parser";
+import path from "path";
+import { fileURLToPath } from "url";
 
 import authRoutes from "./routes/auth.routes.js";
 import pricesRoutes from "./routes/prices.routes.js";
 import ridesRoutes from "./routes/rides.routes.js";
 import pdfRoutes from "./routes/pdf.routes.js";
 
-dotenv.config();
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+dotenv.config({ path: path.resolve(__dirname, "../.env") });
 
 const app = express();
 
