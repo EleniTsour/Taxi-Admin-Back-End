@@ -76,6 +76,7 @@ app.use((err, req, res, next) => {
     return res.status(503).json({
       error: "Database unavailable",
       detail: "Backend is running, but database is not connected/configured.",
+      code: err?.code || "UNKNOWN_DB_ERROR",
     });
   }
 
