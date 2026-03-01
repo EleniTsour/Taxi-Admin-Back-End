@@ -1,9 +1,59 @@
 import { Router } from "express";
 import PDFDocument from "pdfkit";
+import { existsSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { requireAuth } from "../auth.js";
 
 const router = Router();
 const DEFAULT_NAME_TAG_LOGO_URL = "https://versa-reg.eu/versa-logo.png";
+const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
+
+function pickFirstExisting(paths = []) {
+  for (const p of paths) {
+    if (existsSync(p)) return p;
+  }
+  return null;
+}
+
+const FONT_REGULAR =
+  pickFirstExisting([
+    path.resolve(MODULE_DIR, "../../assets/fonts/NotoSans-Regular.ttf"),
+    path.resolve(MODULE_DIR, "../../assets/fonts/DejaVuSans.ttf"),
+    "C:\\Windows\\Fonts\\arial.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
+  ]) || "Helvetica";
+
+const FONT_BOLD =
+  pickFirstExisting([
+    path.resolve(MODULE_DIR, "../../assets/fonts/NotoSans-Bold.ttf"),
+    path.resolve(MODULE_DIR, "../../assets/fonts/DejaVuSans-Bold.ttf"),
+    "C:\\Windows\\Fonts\\arialbd.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf",
+  ]) || "Helvetica-Bold";
+
+function toAsciiFilename(filename, fallback = "document.pdf") {
+  const raw = String(filename ?? "").replace(/[\r\n]+/g, " ").trim();
+  if (!raw) return fallback;
+
+  const normalized = raw.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  const safe = normalized
+    .replace(/[^\x20-\x7E]/g, "")
+    .replace(/[^A-Za-z0-9._-]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 120);
+
+  return safe || fallback;
+}
+
+function buildContentDispositionInline(filename) {
+  const original = String(filename ?? "document.pdf").replace(/[\r\n]+/g, " ").trim() || "document.pdf";
+  const ascii = toAsciiFilename(original, "document.pdf");
+  const encoded = encodeURIComponent(original);
+  return `inline; filename="${ascii}"; filename*=UTF-8''${encoded}`;
+}
 
 function toVoucherData(ride = {}) {
   return {
@@ -44,9 +94,9 @@ function renderVoucherPage(doc, data) {
     const safe = String(value ?? "");
     const valueWidth = Math.max(40, width - labelWidth - 6);
 
-    doc.font("Helvetica-Bold").fontSize(10).text(`${label}:`, x, y, { width: labelWidth });
+    doc.font(FONT_BOLD).fontSize(10).text(`${label}:`, x, y, { width: labelWidth });
 
-    doc.font("Helvetica").fontSize(11).text(safe, x + labelWidth + 6, y - 1, {
+    doc.font(FONT_REGULAR).fontSize(11).text(safe, x + labelWidth + 6, y - 1, {
       width: valueWidth,
       lineBreak: true,
     });
@@ -68,36 +118,36 @@ function renderVoucherPage(doc, data) {
   const drawFlightPaxRow = (x, y, width) => {
     const valueWidth = Math.max(40, width - labelWidth - 6);
 
-    doc.font("Helvetica-Bold").fontSize(11).text("Fly Code:", x, y, {
+    doc.font(FONT_BOLD).fontSize(11).text("Fly Code:", x, y, {
       continued: true,
       width: valueWidth,
       lineBreak: false,
     });
-    doc.font("Helvetica").fontSize(11).text(` ${String(data.FLY_CODE ?? "")}    `, {
+    doc.font(FONT_REGULAR).fontSize(11).text(` ${String(data.FLY_CODE ?? "")}    `, {
       continued: true,
       lineBreak: false,
     });
-    doc.font("Helvetica-Bold").fontSize(11).text("Pax:", {
+    doc.font(FONT_BOLD).fontSize(11).text("Pax:", {
       continued: true,
       lineBreak: false,
     });
-    doc.font("Helvetica").fontSize(11).text(` ${String(data.PAX ?? "")}    `, {
+    doc.font(FONT_REGULAR).fontSize(11).text(` ${String(data.PAX ?? "")}    `, {
       continued: true,
       lineBreak: false,
     });
-    doc.font("Helvetica-Bold").fontSize(11).text("Adult:", {
+    doc.font(FONT_BOLD).fontSize(11).text("Adult:", {
       continued: true,
       lineBreak: false,
     });
-    doc.font("Helvetica").fontSize(11).text(` ${String(data.ADULT ?? "")}    `, {
+    doc.font(FONT_REGULAR).fontSize(11).text(` ${String(data.ADULT ?? "")}    `, {
       continued: true,
       lineBreak: false,
     });
-    doc.font("Helvetica-Bold").fontSize(11).text("Ch/Inf:", {
+    doc.font(FONT_BOLD).fontSize(11).text("Ch/Inf:", {
       continued: true,
       lineBreak: false,
     });
-    doc.font("Helvetica").fontSize(11).text(` ${String(data.CH_INF ?? "")}`);
+    doc.font(FONT_REGULAR).fontSize(11).text(` ${String(data.CH_INF ?? "")}`);
 
     const blockHeight = doc.heightOfString(
       `Fly Code: ${String(data.FLY_CODE ?? "")}    Pax: ${String(data.PAX ?? "")}    Adult: ${String(data.ADULT ?? "")}    Ch/Inf: ${String(data.CH_INF ?? "")}`,
@@ -108,7 +158,7 @@ function renderVoucherPage(doc, data) {
   };
 
   let y = 42;
-  doc.font("Helvetica").fontSize(11).text(data.COMPANY_NAME, leftX, y);
+  doc.font(FONT_REGULAR).fontSize(11).text(data.COMPANY_NAME, leftX, y);
   y += 15;
   doc.text(data.COMPANY_LINE1, leftX, y);
   y += 15;
@@ -123,7 +173,7 @@ function renderVoucherPage(doc, data) {
   doc.text(data.COMPANY_EMAIL, leftX, y);
 
   doc
-    .font("Helvetica-Bold")
+    .font(FONT_BOLD)
     .fontSize(12)
     .text(`A/A: ${data.AA}`, rightX, 42, { width: colWidth, align: "right" });
 
@@ -141,7 +191,7 @@ function renderVoucherPage(doc, data) {
 
 function streamPdf(res, filename, buildFn) {
   res.setHeader("Content-Type", "application/pdf");
-  res.setHeader("Content-Disposition", `inline; filename="${filename}"`);
+  res.setHeader("Content-Disposition", buildContentDispositionInline(filename));
 
   const doc = new PDFDocument({
     size: "A4",
@@ -172,7 +222,7 @@ function buildPdfBuffer(buildFn) {
 
 function streamLandscapePdf(res, filename, buildFn) {
   res.setHeader("Content-Type", "application/pdf");
-  res.setHeader("Content-Disposition", `inline; filename="${filename}"`);
+  res.setHeader("Content-Disposition", buildContentDispositionInline(filename));
 
   const doc = new PDFDocument({
     size: "A4",
@@ -194,12 +244,12 @@ function renderNameTagPage(doc, name, logoBuffer = null) {
   const contentWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
   const contentHeight = doc.page.height - doc.page.margins.top - doc.page.margins.bottom;
 
-  let fontSize = 130;
-  doc.font("Helvetica-Bold");
-  while (fontSize > 36) {
+  let fontSize = 96;
+  doc.font(FONT_BOLD);
+  while (fontSize > 24) {
     doc.fontSize(fontSize);
     const textHeight = doc.heightOfString(safeName, { width: contentWidth, align: "center" });
-    if (textHeight <= contentHeight * 0.7) break;
+    if (textHeight <= contentHeight * 0.62) break;
     fontSize -= 4;
   }
 
