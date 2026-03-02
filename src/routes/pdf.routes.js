@@ -55,10 +55,23 @@ function buildContentDispositionInline(filename) {
   return `inline; filename="${ascii}"; filename*=UTF-8''${encoded}`;
 }
 
+function formatDateForVoucherDisplay(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+
+  const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return `${iso[3]}/${iso[2]}/${iso[1]}`;
+
+  const european = raw.match(/^(\d{2})[/-](\d{2})[/-](\d{4})$/);
+  if (european) return `${european[1]}/${european[2]}/${european[3]}`;
+
+  return raw;
+}
+
 function toVoucherData(ride = {}) {
   return {
     AA: ride["A/A"] ?? ride.AA ?? "",
-    THE_DATE: ride.THE_DATE ?? ride.DATE ?? "",
+    THE_DATE: formatDateForVoucherDisplay(ride.THE_DATE ?? ride.DATE ?? ""),
     TIME: ride.TIME ?? "",
     TYPE: ride.TYPE ?? "",
     FROM: ride.FROM ?? "",
