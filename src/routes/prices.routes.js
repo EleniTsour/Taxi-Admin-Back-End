@@ -29,6 +29,32 @@ router.get("/", requireAuth, async (req, res) => {
   res.json(rows);
 });
 
+router.post("/tours", requireAuth, async (req, res) => {
+  const tour = String(req.body?.tour ?? "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!tour) {
+    return res.status(400).json({ error: "Tour operator name is required." });
+  }
+
+  const [existingRows] = await pool.query(
+    "SELECT 1 FROM prices WHERE LOWER(TRIM(`Tour`)) = LOWER(TRIM(?)) LIMIT 1",
+    [tour],
+  );
+
+  if (existingRows.length) {
+    return res.status(409).json({ error: "This tour operator already exists." });
+  }
+
+  await pool.query(
+    "INSERT INTO prices (`Destination`, `Tour`, `Price`) VALUES (?, ?, ?)",
+    ["", tour, 0],
+  );
+
+  return res.status(201).json({ ok: true, tour });
+});
+
 // Lookup single price by destination + tour_oper
 router.get("/lookup", requireAuth, async (req, res) => {
   const { destination, tour } = req.query;
