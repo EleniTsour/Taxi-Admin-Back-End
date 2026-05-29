@@ -9,6 +9,8 @@ import authRoutes from "./routes/auth.routes.js";
 import pricesRoutes from "./routes/prices.routes.js";
 import ridesRoutes from "./routes/rides.routes.js";
 import pdfRoutes from "./routes/pdf.routes.js";
+import exportRoutes from "./routes/exports.routes.js";
+import { initExportJobService } from "./exportJobs.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -59,6 +61,7 @@ app.use("/auth", authRoutes);
 app.use("/prices", pricesRoutes);
 app.use("/rides", ridesRoutes);
 app.use("/pdf", pdfRoutes);
+app.use("/exports", exportRoutes);
 
 app.use((req, res) => {
   res.status(404).json({ error: "Not found" });
@@ -93,4 +96,7 @@ app.use((err, req, res, next) => {
 });
 
 const port = Number(process.env.PORT || 4000);
+void initExportJobService().catch((err) => {
+  console.error("Export job service initialization failed", err);
+});
 app.listen(port, "0.0.0.0", () => console.log(`API running on port ${port}`));

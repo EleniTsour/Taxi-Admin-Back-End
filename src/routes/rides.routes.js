@@ -2,9 +2,14 @@ import { Router } from "express";
 import { pool } from "../db.js";
 import { requireAuth } from "../auth.js";
 import { resolveIdColumn } from "../dbColumns.js";
+import {
+  MAX_EXPORT_EXCEL_ROWS,
+  fetchAllMatchingRides,
+  fetchRideSearchPage,
+} from "../rideSearch.js";
+import { buildSpreadsheetXml } from "../exportArtifacts.js";
 
 const router = Router();
-let cachedTheDateDataType = null;
 let cachedDataColumns = null;
 
 function csvCell(value) {
@@ -37,23 +42,6 @@ async function resolveDataColumns() {
 
   cachedDataColumns = new Set(rows.map((r) => String(r.COLUMN_NAME ?? "")));
   return cachedDataColumns;
-}
-
-async function resolveTheDateDataType() {
-  if (cachedTheDateDataType) return cachedTheDateDataType;
-  const [rows] = await pool.query(
-    `
-      SELECT LOWER(DATA_TYPE) AS dataType
-      FROM INFORMATION_SCHEMA.COLUMNS
-      WHERE TABLE_SCHEMA = COALESCE(?, DATABASE())
-        AND TABLE_NAME = 'data'
-        AND COLUMN_NAME = 'THE_DATE'
-      LIMIT 1
-    `,
-    [process.env.DB_NAME || null],
-  );
-  cachedTheDateDataType = String(rows?.[0]?.dataType ?? "");
-  return cachedTheDateDataType;
 }
 
 function toNullableNumber(value) {
@@ -211,120 +199,35 @@ router.delete("/:id", requireAuth, async (req, res) => {
  * GET /rides/search?from=YYYY-MM-DD&to=YYYY-MM-DD&from_location=...&to_location=...&tour_oper=...&driver=...&page=1&pageSize=50&sortBy=THE_DATE&sortDir=desc
  */
 router.get("/search", requireAuth, async (req, res) => {
-  const {
-    from,
-    to,
-    from_location,
-    to_location,
-    tour_oper,
-    driver,
-    page,
-    pageSize,
-    sortBy,
-    sortDir,
-  } = req.query;
-  const idColumn = await resolveIdColumn("data");
-  const theDateType = await resolveTheDateDataType();
-  const isNativeDateType = ["date", "datetime", "timestamp"].includes(theDateType);
-  const currentPage = Math.max(1, Number.parseInt(page, 10) || 1);
-  const currentPageSize = Math.min(200, Math.max(10, Number.parseInt(pageSize, 10) || 50));
-  const offset = (currentPage - 1) * currentPageSize;
-  const normalizedDateExpr = [
-    "COALESCE(",
-    "DATE(`THE_DATE`),",
-    "STR_TO_DATE(SUBSTRING_INDEX(`THE_DATE`, 'T', 1), '%Y-%m-%d'),",
-    "STR_TO_DATE(`THE_DATE`, '%d/%m/%Y'),",
-    "STR_TO_DATE(`THE_DATE`, '%Y-%m-%d')",
-    ")",
-  ].join(" ");
+  const { page, pageSize } = req.query;
+  const result = await fetchRideSearchPage(req.query, page, pageSize);
+  res.json(result);
+});
 
-  const where = [];
-  const params = [];
+/**
+ * Excel-compatible export for the current filtered result set.
+ * GET /rides/search/export.xlsx?...
+ * Legacy/manual route: Search / Reports now uses the queued /exports flow instead.
+ * TODO: remove this route after the queued /exports flow is verified in production.
+ */
+router.get("/search/export.xlsx", requireAuth, async (req, res) => {
+  console.warn("Legacy export route used: GET /rides/search/export.xlsx");
+  try {
+    const result = await fetchAllMatchingRides(req.query, MAX_EXPORT_EXCEL_ROWS);
+    const workbookXml = buildSpreadsheetXml(result.rows);
+    const datePart = new Date().toISOString().slice(0, 10);
 
-  if (from) {
-    if (isNativeDateType) {
-      where.push("`THE_DATE` >= ?");
-      params.push(from);
-    } else {
-      where.push(`${normalizedDateExpr} >= ?`);
-      params.push(from);
-    }
+    res.setHeader("Content-Type", "application/vnd.ms-excel; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename=\"rides_report_${datePart}.xls\"`);
+    return res.status(200).send(workbookXml);
+  } catch (err) {
+    const status = Number(err?.status || 500);
+    return res.status(status).json({
+      error: err?.message || "Could not export Excel.",
+      total: err?.total ?? undefined,
+      limit: err?.limit ?? MAX_EXPORT_EXCEL_ROWS,
+    });
   }
-  if (to) {
-    if (isNativeDateType) {
-      // Inclusive end-date for native datetime/date columns.
-      where.push("`THE_DATE` < DATE_ADD(?, INTERVAL 1 DAY)");
-      params.push(to);
-    } else {
-      // Inclusive end-date based on normalized calendar date.
-      where.push(`${normalizedDateExpr} <= ?`);
-      params.push(to);
-    }
-  }
-  if (tour_oper) {
-    where.push("`TOUR_OPER` = ?");
-    params.push(tour_oper);
-  }
-  if (driver) {
-    where.push("`DRIVER` = ?");
-    params.push(driver);
-  }
-  if (from_location) {
-    where.push("`FROM` = ?");
-    params.push(from_location);
-  }
-  if (to_location) {
-    where.push("`TO` = ?");
-    params.push(to_location);
-  }
-
-  const sortableColumns = {
-    "A/A": `\`${idColumn}\``,
-    THE_DATE: isNativeDateType ? "`THE_DATE`" : normalizedDateExpr,
-    TIME: "`TIME`",
-  };
-  const requestedSortBy = String(sortBy ?? "THE_DATE");
-  const sortExpr = sortableColumns[requestedSortBy] ?? "`THE_DATE`";
-  const normalizedSortDir = String(sortDir ?? "desc").toLowerCase() === "asc" ? "ASC" : "DESC";
-  const orderBySql = requestedSortBy === "THE_DATE"
-    ? `${sortExpr} ${normalizedSortDir}, \`TIME\` DESC`
-    : `${sortExpr} ${normalizedSortDir}, \`THE_DATE\` DESC, \`TIME\` DESC`;
-
-  const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
-  const countSql = `
-    SELECT COUNT(*) AS total
-    FROM data
-    ${whereSql}
-  `;
-
-  const [countRows] = await pool.query(countSql, params);
-  const total = Number(countRows?.[0]?.total ?? 0);
-
-  const sql = `
-    SELECT
-      \`${idColumn}\` AS \`A/A\`,
-      ${isNativeDateType
-    ? "DATE_FORMAT(`THE_DATE`, '%Y-%m-%d')"
-    : `DATE_FORMAT(${normalizedDateExpr}, '%Y-%m-%d')`} AS \`THE_DATE\`,
-      \`TIME\`, \`TYPE\`, \`FROM\`, \`TO\`,
-      \`HOTEL NAME\`, \`AREA\`, \`FLY_CODE\`, \`FLY_COMPANY\`,
-      \`THE_NAME\`, \`EMAIL\`, \`PAX\`, \`ADULT\`, \`CH/INF\`,
-      \`INFO\`, \`VCode\`, \`TOUR_OPER\`, \`PRICE\`, \`DRIVER\`, \`DRIVER_PRICE\`
-    FROM data
-    ${whereSql}
-    ORDER BY ${orderBySql}
-    LIMIT ? OFFSET ?
-  `;
-
-  const [rows] = await pool.query(sql, [...params, currentPageSize, offset]);
-  res.json({
-    rows,
-    total,
-    page: currentPage,
-    pageSize: currentPageSize,
-    sortBy: requestedSortBy,
-    sortDir: normalizedSortDir.toLowerCase(),
-  });
 });
 
 /**

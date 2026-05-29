@@ -1,38 +1,15 @@
 import { Router } from "express";
 import PDFDocument from "pdfkit";
-import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { requireAuth } from "../auth.js";
+import { MAX_EXPORT_PDF_ROWS, fetchAllMatchingRides } from "../rideSearch.js";
+import { buildPdfBuffer, buildCombinedVoucherPdfBuffer, toVoucherData } from "../exportArtifacts.js";
+import { renderVoucherPage } from "../pdfVoucher.js";
 
 const router = Router();
 const DEFAULT_NAME_TAG_LOGO_URL = "https://versa-reg.eu/versa-logo.png";
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
-
-function pickFirstExisting(paths = []) {
-  for (const p of paths) {
-    if (existsSync(p)) return p;
-  }
-  return null;
-}
-
-const FONT_REGULAR =
-  pickFirstExisting([
-    path.resolve(MODULE_DIR, "../../assets/fonts/NotoSans-Regular.ttf"),
-    path.resolve(MODULE_DIR, "../../assets/fonts/DejaVuSans.ttf"),
-    "C:\\Windows\\Fonts\\arial.ttf",
-    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-    "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
-  ]) || "Helvetica";
-
-const FONT_BOLD =
-  pickFirstExisting([
-    path.resolve(MODULE_DIR, "../../assets/fonts/NotoSans-Bold.ttf"),
-    path.resolve(MODULE_DIR, "../../assets/fonts/DejaVuSans-Bold.ttf"),
-    "C:\\Windows\\Fonts\\arialbd.ttf",
-    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-    "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf",
-  ]) || "Helvetica-Bold";
 
 function toAsciiFilename(filename, fallback = "document.pdf") {
   const raw = String(filename ?? "").replace(/[\r\n]+/g, " ").trim();
@@ -55,153 +32,6 @@ function buildContentDispositionInline(filename) {
   return `inline; filename="${ascii}"; filename*=UTF-8''${encoded}`;
 }
 
-function formatDateForVoucherDisplay(value) {
-  const raw = String(value ?? "").trim();
-  if (!raw) return "";
-
-  const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (iso) return `${iso[3]}/${iso[2]}/${iso[1]}`;
-
-  const european = raw.match(/^(\d{2})[/-](\d{2})[/-](\d{4})$/);
-  if (european) return `${european[1]}/${european[2]}/${european[3]}`;
-
-  return raw;
-}
-
-function toVoucherData(ride = {}) {
-  return {
-    AA: ride["A/A"] ?? ride.AA ?? "",
-    THE_DATE: formatDateForVoucherDisplay(ride.THE_DATE ?? ride.DATE ?? ""),
-    TIME: ride.TIME ?? "",
-    TYPE: ride.TYPE ?? "",
-    FROM: ride.FROM ?? "",
-    TO: ride.TO ?? "",
-    HOTEL: ride["HOTEL NAME"] ?? ride.HOTEL ?? "",
-    AREA: ride.AREA ?? "",
-    FLY_CODE: ride.FLY_CODE ?? "",
-    FLY_COMPANY: ride.FLY_COMPANY ?? "",
-    THE_NAME: ride.THE_NAME ?? ride["CUSTOMER NAME"] ?? "",
-    PAX: ride.PAX ?? "",
-    ADULT: ride.ADULT ?? "",
-    CH_INF: ride["CH/INF"] ?? ride.CH_INF ?? "",
-    INFO: ride.INFO ?? "",
-    COMPANY_NAME: ride.COMPANY_NAME ?? "Versa tours",
-    COMPANY_LINE1: ride.COMPANY_LINE1 ?? "Transfer and Tours in Crete",
-    COMPANY_WEB: ride.COMPANY_WEB ?? "http://www.versatours.gr",
-    COMPANY_GNTO: ride.COMPANY_GNTO ?? "GNTO 1039E81000282101",
-    COMPANY_VAT: ride.COMPANY_VAT ?? "VAT 039273005",
-    COMPANY_TEL: ride.COMPANY_TEL ?? "Tel +306972250074",
-    COMPANY_EMAIL: ride.COMPANY_EMAIL ?? "Email mailbox@versatours.gr",
-  };
-}
-
-function renderVoucherPage(doc, data) {
-  const leftX = 28;
-  const contentWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
-  const colGap = 24;
-  const colWidth = (contentWidth - colGap) / 2;
-  const rightX = leftX + colWidth + colGap;
-  const labelWidth = 90;
-
-  const drawField = (label, value, x, y, width) => {
-    const safe = String(value ?? "");
-    const valueWidth = Math.max(40, width - labelWidth - 6);
-
-    doc.font(FONT_BOLD).fontSize(10).text(`${label}:`, x, y, { width: labelWidth });
-
-    doc.font(FONT_REGULAR).fontSize(11).text(safe, x + labelWidth + 6, y - 1, {
-      width: valueWidth,
-      lineBreak: true,
-    });
-
-    const blockHeight = doc.heightOfString(safe || " ", {
-      width: valueWidth,
-      lineGap: 0,
-    });
-
-    return y + Math.max(14, blockHeight) + 7;
-  };
-
-  const drawFieldPair = (leftLabel, leftValue, rightLabel, rightValue, y) => {
-    const nextLeft = drawField(leftLabel, leftValue, leftX, y, colWidth);
-    const nextRight = drawField(rightLabel, rightValue, rightX, y, colWidth);
-    return Math.max(nextLeft, nextRight);
-  };
-
-  const drawFlightPaxRow = (x, y, width) => {
-    const valueWidth = Math.max(40, width - labelWidth - 6);
-
-    doc.font(FONT_BOLD).fontSize(11).text("Fly Code:", x, y, {
-      continued: true,
-      width: valueWidth,
-      lineBreak: false,
-    });
-    doc.font(FONT_REGULAR).fontSize(11).text(` ${String(data.FLY_CODE ?? "")}    `, {
-      continued: true,
-      lineBreak: false,
-    });
-    doc.font(FONT_BOLD).fontSize(11).text("Pax:", {
-      continued: true,
-      lineBreak: false,
-    });
-    doc.font(FONT_REGULAR).fontSize(11).text(` ${String(data.PAX ?? "")}    `, {
-      continued: true,
-      lineBreak: false,
-    });
-    doc.font(FONT_BOLD).fontSize(11).text("Adult:", {
-      continued: true,
-      lineBreak: false,
-    });
-    doc.font(FONT_REGULAR).fontSize(11).text(` ${String(data.ADULT ?? "")}    `, {
-      continued: true,
-      lineBreak: false,
-    });
-    doc.font(FONT_BOLD).fontSize(11).text("Ch/Inf:", {
-      continued: true,
-      lineBreak: false,
-    });
-    doc.font(FONT_REGULAR).fontSize(11).text(` ${String(data.CH_INF ?? "")}`);
-
-    const blockHeight = doc.heightOfString(
-      `Fly Code: ${String(data.FLY_CODE ?? "")}    Pax: ${String(data.PAX ?? "")}    Adult: ${String(data.ADULT ?? "")}    Ch/Inf: ${String(data.CH_INF ?? "")}`,
-      { width: valueWidth, lineGap: 0 },
-    );
-
-    return y + Math.max(14, blockHeight) + 7;
-  };
-
-  let y = 42;
-  doc.font(FONT_REGULAR).fontSize(11).text(data.COMPANY_NAME, leftX, y);
-  y += 15;
-  doc.text(data.COMPANY_LINE1, leftX, y);
-  y += 15;
-  doc.text(data.COMPANY_WEB, leftX, y);
-  y += 15;
-  doc.text(data.COMPANY_GNTO, leftX, y);
-  y += 15;
-  doc.text(data.COMPANY_VAT, leftX, y);
-  y += 15;
-  doc.text(data.COMPANY_TEL, leftX, y);
-  y += 15;
-  doc.text(data.COMPANY_EMAIL, leftX, y);
-
-  doc
-    .font(FONT_BOLD)
-    .fontSize(12)
-    .text(`A/A: ${data.AA}`, rightX, 42, { width: colWidth, align: "right" });
-
-  y = 170;
-  y = drawField("Type", data.TYPE, leftX, y, contentWidth);
-  y = drawFieldPair("Date", data.THE_DATE, "Time", data.TIME, y);
-  y = drawField("From", data.FROM, leftX, y, contentWidth);
-  y = drawFieldPair("To", data.TO, "Area", data.AREA, y);
-  y = drawField("Hotel", data.HOTEL, leftX, y, contentWidth);
-  y = drawFlightPaxRow(leftX, y, contentWidth);
-  y = drawField("Customer Name", data.THE_NAME, leftX, y, contentWidth);
-  y = drawField("Fly Company", data.FLY_COMPANY, leftX, y, contentWidth);
-  drawField("Info", data.INFO, leftX, y, contentWidth);
-}
-
 function streamPdf(res, filename, buildFn) {
   res.setHeader("Content-Type", "application/pdf");
   res.setHeader("Content-Disposition", buildContentDispositionInline(filename));
@@ -214,23 +44,6 @@ function streamPdf(res, filename, buildFn) {
   doc.pipe(res);
   buildFn(doc);
   doc.end();
-}
-
-function buildPdfBuffer(buildFn) {
-  return new Promise((resolve, reject) => {
-    const doc = new PDFDocument({
-      size: "A4",
-      margins: { top: 36, left: 28, right: 28, bottom: 36 },
-    });
-
-    const chunks = [];
-    doc.on("data", (chunk) => chunks.push(chunk));
-    doc.on("end", () => resolve(Buffer.concat(chunks)));
-    doc.on("error", reject);
-
-    buildFn(doc);
-    doc.end();
-  });
 }
 
 function streamLandscapePdf(res, filename, buildFn) {
@@ -246,6 +59,15 @@ function streamLandscapePdf(res, filename, buildFn) {
   doc.pipe(res);
   buildFn(doc);
   doc.end();
+}
+
+function streamCombinedVoucherPdf(res, rows, filename) {
+  streamPdf(res, filename, (doc) => {
+    rows.map((ride) => toVoucherData(ride)).forEach((voucher, index) => {
+      if (index > 0) doc.addPage();
+      renderVoucherPage(doc, voucher);
+    });
+  });
 }
 
 function normalizeName(value) {
@@ -427,20 +249,38 @@ router.post("/voucher", async (req, res) => {
  * POST /pdf/vouchers
  * Body: { rides: [...] } or [...]
  * Returns one PDF with one voucher per page.
+ * Legacy/manual route: Search / Reports now uses the queued /exports flow instead.
+ * TODO: remove this route after the queued /exports flow is verified in production.
  */
-router.post("/vouchers", async (req, res) => {
+router.post("/vouchers", requireAuth, async (req, res) => {
+  console.warn("Legacy export route used: POST /pdf/vouchers");
   const rides = Array.isArray(req.body) ? req.body : req.body?.rides;
   if (!Array.isArray(rides) || rides.length === 0) {
     return res.status(400).json({ error: "Body must contain a non-empty rides array." });
   }
 
-  const vouchers = rides.map((ride) => toVoucherData(ride));
-  streamPdf(res, `vouchers_${vouchers.length}.pdf`, (doc) => {
-    vouchers.forEach((voucher, index) => {
-      if (index > 0) doc.addPage();
-      renderVoucherPage(doc, voucher);
+  streamCombinedVoucherPdf(res, rides, `vouchers_${rides.length}.pdf`);
+});
+
+/**
+ * GET /pdf/vouchers?from=...&to=...&tour_oper=...&driver=...&sortBy=...&sortDir=...
+ * Returns one PDF with one voucher per page for all matching rides.
+ * Legacy/manual route: Search / Reports now uses the queued /exports flow instead.
+ * TODO: remove this route after the queued /exports flow is verified in production.
+ */
+router.get("/vouchers", requireAuth, async (req, res) => {
+  console.warn("Legacy export route used: GET /pdf/vouchers");
+  try {
+    const result = await fetchAllMatchingRides(req.query, MAX_EXPORT_PDF_ROWS);
+    streamCombinedVoucherPdf(res, result.rows, `vouchers_${result.rows.length}.pdf`);
+  } catch (err) {
+    const status = Number(err?.status || 500);
+    return res.status(status).json({
+      error: err?.message || "Could not generate combined PDF.",
+      total: err?.total ?? undefined,
+      limit: err?.limit ?? MAX_EXPORT_PDF_ROWS,
     });
-  });
+  }
 });
 
 /**
