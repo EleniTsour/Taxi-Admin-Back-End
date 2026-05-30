@@ -1,6 +1,6 @@
 import PDFDocument from "pdfkit";
 import { EXPORT_COLUMNS } from "./rideSearch.js";
-import * as XLSX from "../../frontend/node_modules/xlsx/xlsx.mjs";
+import * as XLSX from "./vendor/xlsx.mjs";
 
 function formatDateForVoucherDisplay(value) {
   const raw = String(value ?? "").trim();
