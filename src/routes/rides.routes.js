@@ -7,7 +7,7 @@ import {
   fetchAllMatchingRides,
   fetchRideSearchPage,
 } from "../rideSearch.js";
-import { buildSpreadsheetXml } from "../exportArtifacts.js";
+import { buildExcelBuffer } from "../exportArtifacts.js";
 
 const router = Router();
 let cachedDataColumns = null;
@@ -214,12 +214,12 @@ router.get("/search/export.xlsx", requireAuth, async (req, res) => {
   console.warn("Legacy export route used: GET /rides/search/export.xlsx");
   try {
     const result = await fetchAllMatchingRides(req.query, MAX_EXPORT_EXCEL_ROWS);
-    const workbookXml = buildSpreadsheetXml(result.rows);
+    const workbookBuffer = buildExcelBuffer(result.rows);
     const datePart = new Date().toISOString().slice(0, 10);
 
-    res.setHeader("Content-Type", "application/vnd.ms-excel; charset=utf-8");
-    res.setHeader("Content-Disposition", `attachment; filename=\"rides_report_${datePart}.xls\"`);
-    return res.status(200).send(workbookXml);
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename=\"rides_report_${datePart}.xlsx\"`);
+    return res.status(200).send(workbookBuffer);
   } catch (err) {
     const status = Number(err?.status || 500);
     return res.status(status).json({

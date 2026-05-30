@@ -26,12 +26,12 @@ export const EXPORT_LIMITS = {
 
 const EXPORT_MIME_TYPES = {
   pdf: "application/pdf",
-  excel: "application/vnd.ms-excel; charset=utf-8",
+  excel: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 };
 
 const EXPORT_FILE_EXTENSIONS = {
   pdf: "pdf",
-  excel: "xls",
+  excel: "xlsx",
 };
 
 const EXPORT_FILE_PREFIXES = {
@@ -69,7 +69,7 @@ function normalizeExportQuery(query = {}) {
   }
 
   if (!normalized.sortBy) normalized.sortBy = "THE_DATE";
-  if (!normalized.sortDir) normalized.sortDir = "desc";
+  if (!normalized.sortDir) normalized.sortDir = "asc";
   return normalized;
 }
 

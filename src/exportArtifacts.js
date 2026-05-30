@@ -1,13 +1,6 @@
 import PDFDocument from "pdfkit";
 import { EXPORT_COLUMNS } from "./rideSearch.js";
-
-function escapeXml(value) {
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/\"/g, "&quot;");
-}
+import * as XLSX from "../../frontend/node_modules/xlsx/xlsx.mjs";
 
 function formatDateForVoucherDisplay(value) {
   const raw = String(value ?? "").trim();
@@ -49,47 +42,29 @@ function toVoucherData(ride = {}) {
   };
 }
 
-export function buildSpreadsheetXml(rows) {
-  const buildSpreadsheetRow = (cells, styleId = "Default") => (
-    `<Row>${cells.map((value) => `<Cell ss:StyleID="${styleId}"><Data ss:Type="String">${escapeXml(value)}</Data></Cell>`).join("")}</Row>`
-  );
-
-  const headerRow = buildSpreadsheetRow(EXPORT_COLUMNS.map((column) => column.label), "Header");
-  const dataRows = rows.map((row) => buildSpreadsheetRow(
-    EXPORT_COLUMNS.map((column) => String(row[column.key] ?? "")),
-  )).join("");
+export function buildExcelWorkbook(rows) {
+  const headerRow = EXPORT_COLUMNS.map((column) => column.label);
+  const dataRows = rows.map((row) => (
+    EXPORT_COLUMNS.map((column) => String(row[column.key] ?? ""))
+  ));
   const priceColumnIndex = EXPORT_COLUMNS.findIndex((column) => column.key === "PRICE");
   const totalPrice = rows.reduce((sum, row) => sum + Number(row.PRICE ?? 0), 0);
   const totalRowCells = new Array(EXPORT_COLUMNS.length).fill("");
   if (priceColumnIndex > 0) totalRowCells[priceColumnIndex - 1] = "Total Price";
   if (priceColumnIndex >= 0) totalRowCells[priceColumnIndex] = totalPrice.toFixed(2);
-  const totalRow = buildSpreadsheetRow(totalRowCells, "Header");
+  const sheet = XLSX.utils.aoa_to_sheet([headerRow, ...dataRows, [], totalRowCells]);
+  sheet["!cols"] = EXPORT_COLUMNS.map((column) => ({
+    wch: Math.max(12, column.label.length + 2),
+  }));
 
-  return [
-    "<?xml version=\"1.0\"?>",
-    "<?mso-application progid=\"Excel.Sheet\"?>",
-    "<Workbook xmlns=\"urn:schemas-microsoft-com:office:spreadsheet\"",
-    " xmlns:o=\"urn:schemas-microsoft-com:office:office\"",
-    " xmlns:x=\"urn:schemas-microsoft-com:office:excel\"",
-    " xmlns:ss=\"urn:schemas-microsoft-com:office:spreadsheet\">",
-    "<Styles>",
-    "<Style ss:ID=\"Default\" ss:Name=\"Normal\"><Alignment ss:Vertical=\"Top\" ss:WrapText=\"1\"/></Style>",
-    "<Style ss:ID=\"Header\"><Font ss:Bold=\"1\"/><Alignment ss:Vertical=\"Top\" ss:WrapText=\"1\"/></Style>",
-    "</Styles>",
-    "<Worksheet ss:Name=\"Rides\">",
-    "<Table>",
-    headerRow,
-    dataRows,
-    "<Row></Row>",
-    totalRow,
-    "</Table>",
-    "</Worksheet>",
-    "</Workbook>",
-  ].join("");
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, sheet, "Rides");
+  return workbook;
 }
 
 export function buildExcelBuffer(rows) {
-  return Buffer.from(buildSpreadsheetXml(rows), "utf8");
+  const workbook = buildExcelWorkbook(rows);
+  return Buffer.from(XLSX.write(workbook, { type: "buffer", bookType: "xlsx" }));
 }
 
 export function buildPdfBuffer(buildFn) {

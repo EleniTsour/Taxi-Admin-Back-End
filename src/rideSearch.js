@@ -1,7 +1,7 @@
 import { pool } from "./db.js";
 import { resolveIdColumn } from "./dbColumns.js";
 
-export const MAX_PAGED_SEARCH_ROWS = 200;
+export const MAX_PAGED_SEARCH_ROWS = 500;
 export const MAX_EXPORT_PDF_ROWS = 3000;
 export const MAX_EXPORT_EXCEL_ROWS = 10000;
 
@@ -135,10 +135,10 @@ export async function buildRideSearchContext(query) {
   };
   const requestedSortBy = String(sortBy ?? "THE_DATE");
   const sortExpr = sortableColumns[requestedSortBy] ?? "`THE_DATE`";
-  const normalizedSortDir = String(sortDir ?? "desc").toLowerCase() === "asc" ? "ASC" : "DESC";
+  const normalizedSortDir = String(sortDir ?? "asc").toLowerCase() === "desc" ? "DESC" : "ASC";
   const orderBySql = requestedSortBy === "THE_DATE"
-    ? `${sortExpr} ${normalizedSortDir}, \`TIME\` DESC`
-    : `${sortExpr} ${normalizedSortDir}, \`THE_DATE\` DESC, \`TIME\` DESC`;
+    ? `${sortExpr} ${normalizedSortDir}, \`TIME\` ${normalizedSortDir}`
+    : `${sortExpr} ${normalizedSortDir}, \`THE_DATE\` ASC, \`TIME\` ASC`;
   const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
 
   return {
