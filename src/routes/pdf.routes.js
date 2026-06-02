@@ -41,9 +41,27 @@ function streamPdf(res, filename, buildFn) {
     margins: { top: 36, left: 28, right: 28, bottom: 36 },
   });
 
+  const handleStreamError = (err) => {
+    console.error("PDF stream failed:", err);
+    if (!res.headersSent && !res.writableEnded) {
+      res.status(500).json({ error: "Could not generate PDF." });
+    }
+  };
+
+  res.on("close", () => {
+    if (!res.writableEnded) {
+      doc.destroy();
+    }
+  });
+  doc.on("error", handleStreamError);
   doc.pipe(res);
-  buildFn(doc);
-  doc.end();
+  try {
+    buildFn(doc);
+    doc.end();
+  } catch (err) {
+    doc.destroy(err);
+    handleStreamError(err);
+  }
 }
 
 function streamLandscapePdf(res, filename, buildFn) {
@@ -56,9 +74,27 @@ function streamLandscapePdf(res, filename, buildFn) {
     margins: { top: 28, left: 28, right: 28, bottom: 28 },
   });
 
+  const handleStreamError = (err) => {
+    console.error("PDF stream failed:", err);
+    if (!res.headersSent && !res.writableEnded) {
+      res.status(500).json({ error: "Could not generate PDF." });
+    }
+  };
+
+  res.on("close", () => {
+    if (!res.writableEnded) {
+      doc.destroy();
+    }
+  });
+  doc.on("error", handleStreamError);
   doc.pipe(res);
-  buildFn(doc);
-  doc.end();
+  try {
+    buildFn(doc);
+    doc.end();
+  } catch (err) {
+    doc.destroy(err);
+    handleStreamError(err);
+  }
 }
 
 function streamCombinedVoucherPdf(res, rows, filename) {
