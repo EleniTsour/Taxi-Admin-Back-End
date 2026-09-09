@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { requireAuth } from "../auth.js";
 import { MAX_EXPORT_PDF_ROWS, fetchAllMatchingRides } from "../rideSearch.js";
 import { buildPdfBuffer, buildCombinedVoucherPdfBuffer, toVoucherData } from "../exportArtifacts.js";
-import { renderVoucherPage } from "../pdfVoucher.js";
+import { FONT_BOLD, renderVoucherPage } from "../pdfVoucher.js";
 
 const router = Router();
 const DEFAULT_NAME_TAG_LOGO_URL = "https://versa-reg.eu/versa-logo.png";
@@ -54,12 +54,12 @@ function streamPdf(res, filename, buildFn) {
     }
   });
   doc.on("error", handleStreamError);
-  doc.pipe(res);
   try {
     buildFn(doc);
+    doc.pipe(res);
     doc.end();
   } catch (err) {
-    doc.destroy(err);
+    doc.destroy();
     handleStreamError(err);
   }
 }
@@ -87,12 +87,12 @@ function streamLandscapePdf(res, filename, buildFn) {
     }
   });
   doc.on("error", handleStreamError);
-  doc.pipe(res);
   try {
     buildFn(doc);
+    doc.pipe(res);
     doc.end();
   } catch (err) {
-    doc.destroy(err);
+    doc.destroy();
     handleStreamError(err);
   }
 }

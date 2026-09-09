@@ -20,7 +20,7 @@ const FONT_REGULAR =
     "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
   ]) || "Helvetica";
 
-const FONT_BOLD =
+export const FONT_BOLD =
   pickFirstExisting([
     path.resolve(MODULE_DIR, "../assets/fonts/NotoSans-Bold.ttf"),
     path.resolve(MODULE_DIR, "../assets/fonts/DejaVuSans-Bold.ttf"),
