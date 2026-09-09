@@ -132,13 +132,17 @@ export async function buildRideSearchContext(query) {
     "A/A": `\`${idColumn}\``,
     THE_DATE: isNativeDateType ? "`THE_DATE`" : normalizedDateExpr,
     TIME: "`TIME`",
+    TOUR_OPER: "LOWER(`TOUR_OPER`)",
   };
   const requestedSortBy = String(sortBy ?? "THE_DATE");
   const sortExpr = sortableColumns[requestedSortBy] ?? "`THE_DATE`";
   const normalizedSortDir = String(sortDir ?? "asc").toLowerCase() === "desc" ? "DESC" : "ASC";
   const orderBySql = requestedSortBy === "THE_DATE"
     ? `${sortExpr} ${normalizedSortDir}, \`TIME\` ${normalizedSortDir}`
-    : `${sortExpr} ${normalizedSortDir}, \`THE_DATE\` ASC, \`TIME\` ASC`;
+    : requestedSortBy === "TOUR_OPER"
+      ? "CASE WHEN TRIM(COALESCE(`TOUR_OPER`, '')) = '' THEN 1 ELSE 0 END ASC, " +
+        `${sortExpr} ${normalizedSortDir}, \`THE_DATE\` ASC, \`TIME\` ASC`
+      : `${sortExpr} ${normalizedSortDir}, \`THE_DATE\` ASC, \`TIME\` ASC`;
   const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
 
   return {
