@@ -2,20 +2,31 @@ import { Router } from "express";
 import { pool } from "../db.js";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
-import { requireAuth } from "../auth.js";
+import { createCsrfToken, requireAuth } from "../auth.js";
 
 const router = Router();
 
 function getCookieOptions() {
   const secureDefault = process.env.NODE_ENV === "production";
   const secure = String(process.env.COOKIE_SECURE ?? secureDefault).toLowerCase() === "true";
-  const sameSite = process.env.COOKIE_SAMESITE ?? (secure ? "none" : "lax");
+  const configuredSameSite = String(process.env.COOKIE_SAMESITE ?? "").toLowerCase();
+  const sameSite = ["lax", "strict", "none"].includes(configuredSameSite)
+    ? configuredSameSite
+    : "lax";
+  if (sameSite === "none" && !secure) {
+    throw new Error("COOKIE_SAMESITE=none requires COOKIE_SECURE=true");
+  }
   return {
     httpOnly: true,
     sameSite,
     secure,
     maxAge: 7 * 24 * 60 * 60 * 1000,
   };
+}
+
+function getCsrfCookieOptions() {
+  const { httpOnly: _httpOnly, ...cookieOptions } = getCookieOptions();
+  return cookieOptions;
 }
 
 // Login: sets httpOnly cookie token
@@ -30,22 +41,28 @@ router.post("/login", async (req, res) => {
   const ok = await bcrypt.compare(password, user.password_hash);
   if (!ok) return res.status(401).json({ error: "Invalid credentials" });
 
+  const csrfToken = createCsrfToken();
   const token = jwt.sign(
-    { userId: user.id, email: user.email, role: user.role },
+    { userId: user.id, email: user.email, role: user.role, csrfToken },
     process.env.JWT_SECRET,
     { expiresIn: "7d" }
   );
 
   const cookieOptions = getCookieOptions();
   res.cookie("token", token, cookieOptions);
+  res.cookie("csrf_token", csrfToken, getCsrfCookieOptions());
 
-  res.json({ ok: true, email: user.email, role: user.role, token });
+  res.json({ ok: true, email: user.email, role: user.role });
 });
 
-router.post("/logout", (req, res) => {
+router.post("/logout", requireAuth, (req, res) => {
   const cookieOptions = getCookieOptions();
   res.clearCookie("token", {
     httpOnly: cookieOptions.httpOnly,
+    sameSite: cookieOptions.sameSite,
+    secure: cookieOptions.secure,
+  });
+  res.clearCookie("csrf_token", {
     sameSite: cookieOptions.sameSite,
     secure: cookieOptions.secure,
   });
@@ -61,6 +78,10 @@ router.get("/me", requireAuth, (req, res) => {
       role: req.user?.role,
     },
   });
+});
+
+router.get("/csrf", requireAuth, (req, res) => {
+  res.json({ token: req.user?.csrfToken ?? "" });
 });
 
 router.post("/change-password", requireAuth, async (req, res) => {

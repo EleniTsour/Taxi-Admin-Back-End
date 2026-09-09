@@ -138,15 +138,39 @@ function renderNameTagPage(doc, name, logoBuffer = null) {
   }
 }
 
-async function fetchLogoBufferFromUrl(url) {
-  const response = await fetch(url);
+async function fetchConfiguredLogoBuffer() {
+  const url = String(process.env.NAME_TAG_LOGO_URL ?? DEFAULT_NAME_TAG_LOGO_URL).trim();
+  const parsedUrl = new URL(url);
+  if (parsedUrl.protocol !== "https:") {
+    throw new Error("Configured logo URL must use HTTPS.");
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 5_000);
+  let response;
+  try {
+    response = await fetch(parsedUrl, { signal: controller.signal, redirect: "error" });
+  } finally {
+    clearTimeout(timeout);
+  }
   if (!response.ok) {
     throw new Error(`Logo URL returned ${response.status}`);
   }
 
+  const contentType = String(response.headers.get("content-type") ?? "").toLowerCase();
+  if (!contentType.startsWith("image/png") && !contentType.startsWith("image/jpeg")) {
+    throw new Error("Configured logo must be a PNG or JPEG image.");
+  }
+
+  const maxBytes = 2 * 1024 * 1024;
+  const contentLength = Number(response.headers.get("content-length"));
+  if (Number.isFinite(contentLength) && contentLength > maxBytes) {
+    throw new Error("Configured logo is too large.");
+  }
+
   const arrayBuffer = await response.arrayBuffer();
   const buffer = Buffer.from(arrayBuffer);
-  if (!buffer.length) {
+  if (!buffer.length || buffer.length > maxBytes) {
     throw new Error("Logo image is empty.");
   }
   return buffer;
@@ -274,7 +298,7 @@ function buildVoucherCalendarIcs(data) {
  * POST /pdf/voucher
  * Body: single ride object
  */
-router.post("/voucher", async (req, res) => {
+router.post("/voucher", requireAuth, async (req, res) => {
   const data = toVoucherData(req.body ?? {});
   streamPdf(res, `voucher_${data.AA || "ride"}.pdf`, (doc) => {
     renderVoucherPage(doc, data);
@@ -408,7 +432,7 @@ router.post("/name-tag", requireAuth, async (req, res) => {
 
 /**
  * POST /pdf/name-tag-logo
- * Body: { name: "Customer Name", logoUrl?: "https://..." }
+ * Body: { name: "Customer Name" }
  */
 router.post("/name-tag-logo", requireAuth, async (req, res) => {
   const name = normalizeName(req.body?.name ?? req.body?.THE_NAME);
@@ -416,13 +440,8 @@ router.post("/name-tag-logo", requireAuth, async (req, res) => {
     return res.status(400).json({ error: "Customer name is required." });
   }
 
-  const logoUrl = String(req.body?.logoUrl ?? process.env.NAME_TAG_LOGO_URL ?? DEFAULT_NAME_TAG_LOGO_URL).trim();
-  if (!logoUrl) {
-    return res.status(400).json({ error: "Logo URL is required." });
-  }
-
   try {
-    const logoBuffer = await fetchLogoBufferFromUrl(logoUrl);
+    const logoBuffer = await fetchConfiguredLogoBuffer();
     return streamLandscapePdf(res, `name_tag_logo_${name.replace(/\s+/g, "_")}.pdf`, (doc) => {
       renderNameTagPage(doc, name, logoBuffer);
     });

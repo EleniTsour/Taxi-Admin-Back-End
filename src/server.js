@@ -2,6 +2,8 @@ import express from "express";
 import dotenv from "dotenv";
 import cors from "cors";
 import cookieParser from "cookie-parser";
+import helmet from "helmet";
+import { rateLimit } from "express-rate-limit";
 import path from "path";
 import { fileURLToPath } from "url";
 
@@ -17,6 +19,8 @@ const __dirname = path.dirname(__filename);
 dotenv.config({ path: path.resolve(__dirname, "../.env") });
 
 const app = express();
+
+app.use(helmet());
 
 function normalizeOrigin(origin) {
   const raw = String(origin ?? "").trim();
@@ -35,7 +39,7 @@ const allowedOrigins = [...new Set([...fallbackOrigins, ...configuredOrigins])];
 const corsOptions = {
   credentials: true,
   methods: ["GET", "HEAD", "PUT", "PATCH", "POST", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
+  allowedHeaders: ["Content-Type", "X-CSRF-Token", "X-Requested-With"],
   origin(origin, callback) {
     // Allow non-browser clients (no Origin header).
     if (!origin) return callback(null, true);
@@ -55,8 +59,17 @@ app.options(/.*/, cors(corsOptions));
 app.use(cookieParser());
 app.use(express.json({ limit: "1mb" }));
 
+const loginRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 10,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  message: { error: "Too many login attempts. Please try again in 15 minutes." },
+});
+
 app.get("/health", (req, res) => res.json({ ok: true }));
 
+app.use("/auth/login", loginRateLimiter);
 app.use("/auth", authRoutes);
 app.use("/prices", pricesRoutes);
 app.use("/rides", ridesRoutes);
@@ -96,7 +109,11 @@ app.use((err, req, res, next) => {
 });
 
 const port = Number(process.env.PORT || 4000);
-void initExportJobService().catch((err) => {
-  console.error("Export job service initialization failed", err);
-});
-app.listen(port, "0.0.0.0", () => console.log(`API running on port ${port}`));
+export { app };
+
+if (process.env.NODE_ENV !== "test") {
+  void initExportJobService().catch((err) => {
+    console.error("Export job service initialization failed", err);
+  });
+  app.listen(port, "0.0.0.0", () => console.log(`API running on port ${port}`));
+}

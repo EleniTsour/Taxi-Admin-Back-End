@@ -1,5 +1,6 @@
 # Backend dependencies
 node_modules
+tmp/
 
 # Env files
 .env
