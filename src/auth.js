@@ -19,6 +19,9 @@ export function requireAuth(req, res, next) {
 
   try {
     const payload = jwt.verify(cookieToken, process.env.JWT_SECRET);
+    if (!payload.csrfToken) {
+      return res.status(401).json({ error: "Session renewal required" });
+    }
     req.user = payload;
 
     if (!SAFE_METHODS.has(req.method)) {

@@ -32,6 +32,11 @@ function expiredAuthCookies(csrfToken = "csrf-token") {
   return `token=${token}; csrf_token=${csrfToken}`;
 }
 
+function legacyAuthCookies() {
+  const token = jwt.sign({ userId: 1 }, process.env.JWT_SECRET, { expiresIn: "1h" });
+  return `token=${token}`;
+}
+
 test("voucher endpoint rejects unauthenticated requests", async () => {
   const response = await fetch(`${baseUrl}/pdf/voucher`, {
     method: "POST",
@@ -63,6 +68,19 @@ test("voucher endpoint rejects expired authentication", async () => {
       "Content-Type": "application/json",
       Cookie: expiredAuthCookies(csrfToken),
       "X-CSRF-Token": csrfToken,
+    },
+    body: JSON.stringify({ THE_NAME: "Test passenger" }),
+  });
+
+  assert.equal(response.status, 401);
+});
+
+test("voucher endpoint requires a renewed CSRF-enabled session", async () => {
+  const response = await fetch(`${baseUrl}/pdf/voucher`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Cookie: legacyAuthCookies(),
     },
     body: JSON.stringify({ THE_NAME: "Test passenger" }),
   });
