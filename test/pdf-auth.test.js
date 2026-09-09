@@ -27,6 +27,11 @@ function authCookies(csrfToken = "csrf-token") {
   return `token=${token}; csrf_token=${csrfToken}`;
 }
 
+function expiredAuthCookies(csrfToken = "csrf-token") {
+  const token = jwt.sign({ userId: 1, csrfToken }, process.env.JWT_SECRET, { expiresIn: -1 });
+  return `token=${token}; csrf_token=${csrfToken}`;
+}
+
 test("voucher endpoint rejects unauthenticated requests", async () => {
   const response = await fetch(`${baseUrl}/pdf/voucher`, {
     method: "POST",
@@ -48,6 +53,21 @@ test("voucher endpoint rejects requests without a valid CSRF token", async () =>
   });
 
   assert.equal(response.status, 403);
+});
+
+test("voucher endpoint rejects expired authentication", async () => {
+  const csrfToken = "csrf-token";
+  const response = await fetch(`${baseUrl}/pdf/voucher`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Cookie: expiredAuthCookies(csrfToken),
+      "X-CSRF-Token": csrfToken,
+    },
+    body: JSON.stringify({ THE_NAME: "Test passenger" }),
+  });
+
+  assert.equal(response.status, 401);
 });
 
 test("voucher endpoint accepts an authenticated request with a valid CSRF token", async () => {
@@ -78,4 +98,19 @@ test("login attempts are rate limited", async () => {
 
   assert.equal(response.status, 429);
   assert.match(await response.text(), /Too many login attempts/);
+});
+
+test("logout requires CSRF protection and clears both session cookies", async () => {
+  const csrfToken = "csrf-token";
+  const response = await fetch(`${baseUrl}/auth/logout`, {
+    method: "POST",
+    headers: {
+      Cookie: authCookies(csrfToken),
+      "X-CSRF-Token": csrfToken,
+    },
+  });
+
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get("set-cookie") ?? "", /token=/);
+  assert.match(response.headers.get("set-cookie") ?? "", /csrf_token=/);
 });
