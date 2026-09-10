@@ -14,18 +14,17 @@ export function createCsrfToken() {
 }
 
 export function requireAuth(req, res, next) {
-  const authHeader = String(req.headers?.authorization ?? "");
-  const bearerToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
   const cookieToken = req.cookies?.token;
-  const token = bearerToken || cookieToken;
-  if (!token) return res.status(401).json({ error: "Not authenticated" });
+  if (!cookieToken) return res.status(401).json({ error: "Not authenticated" });
 
   try {
-    const payload = jwt.verify(token, process.env.JWT_SECRET);
+    const payload = jwt.verify(cookieToken, process.env.JWT_SECRET);
+    if (!payload.csrfToken) {
+      return res.status(401).json({ error: "Session renewal required" });
+    }
     req.user = payload;
-    req.authType = bearerToken ? "bearer" : "cookie";
 
-    if (req.authType === "cookie" && !SAFE_METHODS.has(req.method)) {
+    if (!SAFE_METHODS.has(req.method)) {
       const cookieToken = req.cookies?.csrf_token;
       const headerToken = req.get("X-CSRF-Token");
       if (!payload.csrfToken || !tokensMatch(cookieToken, payload.csrfToken) || !tokensMatch(headerToken, payload.csrfToken)) {
