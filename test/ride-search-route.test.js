@@ -40,15 +40,15 @@ after(async () => {
   await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
 });
 
-function sessionCookie() {
-  const token = jwt.sign({ userId: 1, csrfToken: "csrf" }, process.env.JWT_SECRET, { expiresIn: "1h" });
-  return `token=${token}`;
+function bearerAuth() {
+  const token = jwt.sign({ userId: 1 }, process.env.JWT_SECRET, { expiresIn: "1h" });
+  return `Bearer ${token}`;
 }
 
 async function search(sortBy, sortDir) {
   queries = [];
   const response = await fetch(`${baseUrl}/rides/search?sortBy=${sortBy}&sortDir=${sortDir}&page=1&pageSize=25`, {
-    headers: { Cookie: sessionCookie() },
+    headers: { Authorization: bearerAuth() },
   });
   return { response, body: await response.json(), sql: queries.find((query) => query.includes("FROM data") && query.includes("ORDER BY")) };
 }

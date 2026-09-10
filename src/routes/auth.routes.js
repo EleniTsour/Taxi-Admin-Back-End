@@ -52,7 +52,7 @@ router.post("/login", async (req, res) => {
   res.cookie("token", token, cookieOptions);
   res.cookie("csrf_token", csrfToken, getCsrfCookieOptions());
 
-  res.json({ ok: true, email: user.email, role: user.role });
+  res.json({ ok: true, email: user.email, role: user.role, token });
 });
 
 router.post("/logout", requireAuth, (req, res) => {

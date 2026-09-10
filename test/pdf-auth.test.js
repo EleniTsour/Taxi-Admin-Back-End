@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { after, before, test } from "node:test";
+import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
+import { pool } from "../src/db.js";
 
 process.env.NODE_ENV = "test";
 process.env.JWT_SECRET = "test-secret";
@@ -45,6 +47,14 @@ function authHeaders(csrfToken = "csrf-token") {
   };
 }
 
+function bearerToken(options = {}) {
+  return jwt.sign({ userId: 1, ...options }, process.env.JWT_SECRET, { expiresIn: "1h" });
+}
+
+function bearerHeaders(options = {}) {
+  return { Authorization: `Bearer ${bearerToken(options)}` };
+}
+
 test("voucher endpoint rejects unauthenticated requests", async () => {
   const response = await fetch(`${baseUrl}/pdf/voucher`, {
     method: "POST",
@@ -69,6 +79,42 @@ test("authenticated sessions can retrieve their CSRF token and read operations s
   assert.equal(meResponse.status, 200);
 });
 
+test("bearer authentication works without cookies", async () => {
+  const response = await fetch(`${baseUrl}/auth/me`, {
+    headers: bearerHeaders(),
+  });
+
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).ok, true);
+});
+
+test("login returns a bearer token", async () => {
+  const originalQuery = pool.query;
+  const passwordHash = await bcrypt.hash("correct-password", 4);
+  pool.query = async () => [[{
+    id: 1,
+    email: "admin@example.test",
+    password_hash: passwordHash,
+    role: "admin",
+  }]];
+
+  try {
+    const response = await fetch(`${baseUrl}/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: "admin@example.test", password: "correct-password" }),
+    });
+    const body = await response.json();
+
+    assert.equal(response.status, 200);
+    assert.equal(body.ok, true);
+    assert.equal(typeof body.token, "string");
+    assert.equal(jwt.verify(body.token, process.env.JWT_SECRET).email, "admin@example.test");
+  } finally {
+    pool.query = originalQuery;
+  }
+});
+
 test("voucher endpoint rejects requests without a valid CSRF token", async () => {
   const response = await fetch(`${baseUrl}/pdf/voucher`, {
     method: "POST",
@@ -80,6 +126,20 @@ test("voucher endpoint rejects requests without a valid CSRF token", async () =>
   });
 
   assert.equal(response.status, 403);
+});
+
+test("bearer-authenticated state changes do not require CSRF cookies", async () => {
+  const response = await fetch(`${baseUrl}/pdf/voucher`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...bearerHeaders(),
+    },
+    body: JSON.stringify({ THE_NAME: "Test passenger" }),
+  });
+
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get("content-type") ?? "", /^application\/pdf/);
 });
 
 test("voucher endpoint rejects expired authentication", async () => {
@@ -97,7 +157,7 @@ test("voucher endpoint rejects expired authentication", async () => {
   assert.equal(response.status, 401);
 });
 
-test("voucher endpoint requires a renewed CSRF-enabled session", async () => {
+test("cookie-authenticated requests still require CSRF protection", async () => {
   const response = await fetch(`${baseUrl}/pdf/voucher`, {
     method: "POST",
     headers: {
@@ -107,7 +167,7 @@ test("voucher endpoint requires a renewed CSRF-enabled session", async () => {
     body: JSON.stringify({ THE_NAME: "Test passenger" }),
   });
 
-  assert.equal(response.status, 401);
+  assert.equal(response.status, 403);
 });
 
 test("voucher endpoint accepts an authenticated request with a valid CSRF token", async () => {
@@ -203,4 +263,18 @@ test("logout requires CSRF protection and clears both session cookies", async ()
   assert.equal(response.status, 200);
   assert.match(response.headers.get("set-cookie") ?? "", /token=/);
   assert.match(response.headers.get("set-cookie") ?? "", /csrf_token=/);
+});
+
+test("CORS permits the bearer Authorization header for the configured frontend", async () => {
+  const response = await fetch(`${baseUrl}/auth/me`, {
+    method: "OPTIONS",
+    headers: {
+      Origin: "https://versa-reg.eu",
+      "Access-Control-Request-Method": "GET",
+      "Access-Control-Request-Headers": "Authorization",
+    },
+  });
+
+  assert.equal(response.status, 204);
+  assert.match(response.headers.get("access-control-allow-headers") ?? "", /Authorization/i);
 });

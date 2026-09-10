@@ -39,7 +39,7 @@ const allowedOrigins = [...new Set([...fallbackOrigins, ...configuredOrigins])];
 const corsOptions = {
   credentials: true,
   methods: ["GET", "HEAD", "PUT", "PATCH", "POST", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "X-CSRF-Token", "X-Requested-With"],
+  allowedHeaders: ["Authorization", "Content-Type", "X-CSRF-Token", "X-Requested-With"],
   origin(origin, callback) {
     // Allow non-browser clients (no Origin header).
     if (!origin) return callback(null, true);
