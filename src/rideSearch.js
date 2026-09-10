@@ -82,6 +82,7 @@ export async function buildRideSearchContext(query) {
     to_location,
     tour_oper,
     driver,
+    customer_name,
     sortBy,
     sortDir,
   } = query;
@@ -118,6 +119,11 @@ export async function buildRideSearchContext(query) {
   if (driver) {
     where.push("`DRIVER` = ?");
     params.push(driver);
+  }
+  const normalizedCustomerName = String(customer_name ?? "").trim();
+  if (normalizedCustomerName) {
+    where.push("LOWER(TRIM(COALESCE(`THE_NAME`, ''))) LIKE ?");
+    params.push(`%${normalizedCustomerName.toLowerCase()}%`);
   }
   if (from_location) {
     where.push("`FROM` = ?");

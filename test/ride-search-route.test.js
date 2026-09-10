@@ -15,8 +15,8 @@ let queries;
 before(async () => {
   originalQuery = pool.query;
   queries = [];
-  pool.query = async (sql) => {
-    queries.push(sql);
+  pool.query = async (sql, params = []) => {
+    queries.push({ sql, params });
     if (sql.includes("COLUMN_NAME IN")) return [[{ COLUMN_NAME: "A/A" }]];
     if (sql.includes("LOWER(DATA_TYPE)")) return [[{ dataType: "date" }]];
     if (sql.includes("SELECT COUNT(*) AS total")) return [[{ total: 4 }]];
@@ -50,7 +50,8 @@ async function search(sortBy, sortDir) {
   const response = await fetch(`${baseUrl}/rides/search?sortBy=${sortBy}&sortDir=${sortDir}&page=1&pageSize=25`, {
     headers: { Cookie: sessionCookie() },
   });
-  return { response, body: await response.json(), sql: queries.find((query) => query.includes("FROM data") && query.includes("ORDER BY")) };
+  const matchingQuery = queries.find((query) => query.sql.includes("FROM data") && query.sql.includes("ORDER BY"));
+  return { response, body: await response.json(), sql: matchingQuery?.sql, params: matchingQuery?.params };
 }
 
 test("search route accepts the frontend Tour Operator key and sends ascending SQL", async () => {
@@ -72,4 +73,22 @@ test("search route preserves descending Tour Operator sorting and existing date 
   assert.equal(date.response.status, 200);
   assert.equal(date.body.sortBy, "THE_DATE");
   assert.match(date.sql, /ORDER BY `THE_DATE` DESC, `TIME` DESC/);
+});
+
+test("search route applies a trimmed, case-insensitive Customer Name filter with other filters", async () => {
+  queries = [];
+  const response = await fetch(
+    `${baseUrl}/rides/search?from=2026-09-10&to=2026-09-10&tour_oper=Alpha&driver=Driver%20One&customer_name=%20Maria%20&sortBy=THE_DATE&sortDir=asc&page=2&pageSize=25`,
+    { headers: { Cookie: sessionCookie() } },
+  );
+  const body = await response.json();
+  const matchingQuery = queries.find((query) => query.sql.includes("FROM data") && query.sql.includes("ORDER BY"));
+
+  assert.equal(response.status, 200);
+  assert.equal(body.total, 4);
+  assert.match(matchingQuery.sql, /LOWER\(TRIM\(COALESCE\(`THE_NAME`, ''\)\)\) LIKE \?/);
+  assert.match(matchingQuery.sql, /`TOUR_OPER` = \? AND `DRIVER` = \?/);
+  assert.ok(matchingQuery.params.includes("%maria%"));
+  assert.ok(matchingQuery.params.includes("Alpha"));
+  assert.ok(matchingQuery.params.includes("Driver One"));
 });
