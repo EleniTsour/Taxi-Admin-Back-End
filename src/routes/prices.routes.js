@@ -2,23 +2,9 @@ import { Router } from "express";
 import { pool } from "../db.js";
 import { requireAuth } from "../auth.js";
 import { resolveIdColumn } from "../dbColumns.js";
+import { toCsv } from "../csv.js";
 
 const router = Router();
-
-function csvCell(value) {
-  const safe = String(value ?? "")
-    .replace(/"/g, '""')
-    .replace(/\r?\n/g, " ");
-  return `"${safe}"`;
-}
-
-function toCsv(rows, columnNames) {
-  const header = columnNames.map((c) => csvCell(c)).join(",");
-  const lines = rows.map((row) => (
-    columnNames.map((c) => csvCell(row[c])).join(",")
-  ));
-  return [header, ...lines].join("\r\n");
-}
 
 // Get all prices (for dropdowns)
 router.get("/", requireAuth, async (req, res) => {

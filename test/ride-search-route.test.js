@@ -17,6 +17,7 @@ before(async () => {
   queries = [];
   pool.query = async (sql, params = []) => {
     queries.push({ sql, params });
+    if (sql.includes("session_version") && sql.includes("FROM users")) return [[{ sessionVersion: 0 }]];
     if (sql.includes("COLUMN_NAME IN")) return [[{ COLUMN_NAME: "A/A" }]];
     if (sql.includes("LOWER(DATA_TYPE)")) return [[{ dataType: "date" }]];
     if (sql.includes("SELECT COUNT(*) AS total")) return [[{ total: 4 }]];
@@ -41,7 +42,7 @@ after(async () => {
 });
 
 function sessionCookie() {
-  const token = jwt.sign({ userId: 1, csrfToken: "csrf" }, process.env.JWT_SECRET, { expiresIn: "1h" });
+  const token = jwt.sign({ userId: 1, csrfToken: "csrf", sessionVersion: 0 }, process.env.JWT_SECRET, { expiresIn: "1h" });
   return `token=${token}`;
 }
 

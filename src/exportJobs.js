@@ -11,6 +11,9 @@ import {
 } from "./rideSearch.js";
 import { buildCombinedVoucherPdfBuffer, buildExcelBuffer } from "./exportArtifacts.js";
 import { renderVoucherPage } from "./pdfVoucher.js";
+import { countMatchingFinance, fetchAllMatchingFinance } from "./finance.js";
+import { buildFinanceExcelBuffer } from "./exportArtifacts.js";
+import { buildFinancePdfBuffer } from "./financePdf.js";
 
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 const EXPORT_DIR = path.resolve(MODULE_DIR, "../tmp/exports");
@@ -22,6 +25,8 @@ const EXPORT_MAX_CONCURRENT_JOBS = Math.max(1, Number.parseInt(process.env.EXPOR
 export const EXPORT_LIMITS = {
   pdf: Math.max(1, Number.parseInt(process.env.EXPORT_PDF_LIMIT, 10) || MAX_EXPORT_PDF_ROWS || 3000),
   excel: Math.max(1, Number.parseInt(process.env.EXPORT_EXCEL_LIMIT, 10) || MAX_EXPORT_EXCEL_ROWS || 10000),
+  finance_pdf: Math.max(1, Number.parseInt(process.env.EXPORT_PDF_LIMIT, 10) || MAX_EXPORT_PDF_ROWS || 3000),
+  finance_excel: Math.max(1, Number.parseInt(process.env.EXPORT_EXCEL_LIMIT, 10) || MAX_EXPORT_EXCEL_ROWS || 10000),
 };
 
 const EXPORT_MIME_TYPES = {
@@ -37,6 +42,8 @@ const EXPORT_FILE_EXTENSIONS = {
 const EXPORT_FILE_PREFIXES = {
   pdf: "rides_vouchers",
   excel: "rides_report",
+  finance_pdf: "finance_report",
+  finance_excel: "finance_report",
 };
 
 let setupPromise = null;
@@ -45,11 +52,21 @@ let activeJobs = 0;
 
 function normalizeExportType(type) {
   const normalized = String(type ?? "").trim().toLowerCase();
-  if (normalized === "pdf" || normalized === "excel") return normalized;
+  if (["pdf", "excel", "finance_pdf", "finance_excel"].includes(normalized)) return normalized;
   return "";
 }
 
-function normalizeExportQuery(query = {}) {
+export function normalizeExportQuery(query = {}, exportType = "") {
+  if (String(exportType).startsWith("finance_")) {
+    const normalized = {};
+    for (const key of ["tourOperator", "from", "to", "sortBy", "sortDir"]) {
+      const value = String(query?.[key] ?? "").trim();
+      if (value) normalized[key] = value;
+    }
+    if (!normalized.sortBy) normalized.sortBy = "THE_DATE";
+    if (!normalized.sortDir) normalized.sortDir = "desc";
+    return normalized;
+  }
   const normalized = {};
   const raw = query ?? {};
   const mappings = [
@@ -59,6 +76,7 @@ function normalizeExportQuery(query = {}) {
     ["to_location", "to_location"],
     ["tour_oper", "tour_oper"],
     ["driver", "driver"],
+    ["customer_name", "customer_name"],
     ["sortBy", "sortBy"],
     ["sortDir", "sortDir"],
   ];
@@ -245,6 +263,26 @@ async function processJob(job) {
   const type = normalizeExportType(job.export_type);
   const limitValue = Number(job.limit_value ?? EXPORT_LIMITS[type]);
   const query = JSON.parse(String(job.query_json ?? "{}"));
+  if (type === "finance_pdf" || type === "finance_excel") {
+    const result = await fetchAllMatchingFinance(query, limitValue);
+    let filePath = "";
+    try {
+      const fileBuffer = type === "finance_pdf"
+        ? await buildFinancePdfBuffer({ ...result, tourOperator: result.search.tourOperator, from: result.search.from, to: result.search.to })
+        : buildFinanceExcelBuffer(result.rows);
+      const mimeType = type === "finance_pdf" ? EXPORT_MIME_TYPES.pdf : EXPORT_MIME_TYPES.excel;
+      const extension = EXPORT_FILE_EXTENSIONS[type === "finance_pdf" ? "pdf" : "excel"];
+      const datePart = new Date().toISOString().slice(0, 10);
+      const fileName = `${EXPORT_FILE_PREFIXES[type]}_${datePart}_${job.id}.${extension}`;
+      filePath = path.join(EXPORT_DIR, fileName);
+      await fs.writeFile(filePath, fileBuffer);
+      await markJobCompleted(job.id, { fileName, filePath, mimeType, fileSizeBytes: fileBuffer.length });
+    } catch (err) {
+      if (filePath) await fs.unlink(filePath).catch(() => {});
+      throw err;
+    }
+    return;
+  }
   const result = await fetchAllMatchingRides(query, limitValue);
   let filePath = "";
 
@@ -332,9 +370,11 @@ export async function createExportJob({ type, query, user }) {
     throw err;
   }
 
-  const normalizedQuery = normalizeExportQuery(query);
+  const normalizedQuery = normalizeExportQuery(query, normalizedType);
   const limitValue = EXPORT_LIMITS[normalizedType];
-  const resultCount = await countMatchingRides(normalizedQuery);
+  const resultCount = normalizedType.startsWith("finance_")
+    ? await countMatchingFinance(normalizedQuery)
+    : await countMatchingRides(normalizedQuery);
   if (resultCount <= 0) {
     const err = new Error("No rides matched the current filters.");
     err.status = 400;

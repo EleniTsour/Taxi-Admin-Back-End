@@ -13,6 +13,9 @@ import ridesRoutes from "./routes/rides.routes.js";
 import pdfRoutes from "./routes/pdf.routes.js";
 import exportRoutes from "./routes/exports.routes.js";
 import { initExportJobService } from "./exportJobs.js";
+import financeRoutes from "./routes/finance.routes.js";
+import { ensureFinanceInfrastructure } from "./finance.js";
+import { ensureUserSessionInfrastructure } from "./userSessions.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -75,6 +78,7 @@ app.use("/prices", pricesRoutes);
 app.use("/rides", ridesRoutes);
 app.use("/pdf", pdfRoutes);
 app.use("/exports", exportRoutes);
+app.use("/finance", financeRoutes);
 
 app.use((req, res) => {
   res.status(404).json({ error: "Not found" });
@@ -112,8 +116,11 @@ const port = Number(process.env.PORT || 4000);
 export { app };
 
 if (process.env.NODE_ENV !== "test") {
-  void initExportJobService().catch((err) => {
-    console.error("Export job service initialization failed", err);
-  });
-  app.listen(port, "0.0.0.0", () => console.log(`API running on port ${port}`));
+  void Promise.all([ensureFinanceInfrastructure(), ensureUserSessionInfrastructure(), initExportJobService()])
+    .catch((err) => {
+      console.error("Backend infrastructure initialization failed", err);
+    })
+    .finally(() => {
+      app.listen(port, "0.0.0.0", () => console.log(`API running on port ${port}`));
+    });
 }

@@ -8,24 +8,10 @@ import {
   fetchRideSearchPage,
 } from "../rideSearch.js";
 import { buildExcelBuffer } from "../exportArtifacts.js";
+import { toCsv } from "../csv.js";
 
 const router = Router();
 let cachedDataColumns = null;
-
-function csvCell(value) {
-  const safe = String(value ?? "")
-    .replace(/"/g, '""')
-    .replace(/\r?\n/g, " ");
-  return `"${safe}"`;
-}
-
-function toCsv(rows, columnNames) {
-  const header = columnNames.map((c) => csvCell(c)).join(",");
-  const lines = rows.map((row) => (
-    columnNames.map((c) => csvCell(row[c])).join(",")
-  ));
-  return [header, ...lines].join("\r\n");
-}
 
 async function resolveDataColumns() {
   if (cachedDataColumns) return cachedDataColumns;
@@ -52,6 +38,18 @@ function toNullableNumber(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+const NUMERIC_FIELDS = ["ADULT", "PRICE", "DRIVER_PRICE"];
+
+function getInvalidNumericField(body = {}) {
+  for (const field of NUMERIC_FIELDS) {
+    if (!Object.prototype.hasOwnProperty.call(body, field)) continue;
+    const raw = String(body[field] ?? "").trim();
+    if (!raw) continue;
+    if (toNullableNumber(raw) === null) return field;
+  }
+  return null;
+}
+
 function toNullableString(value) {
   const raw = String(value ?? "").trim();
   return raw ? raw : null;
@@ -69,7 +67,7 @@ const UPSERT_FIELDS = [
   { key: "FLY_COMPANY", cast: toNullableString },
   { key: "THE_NAME", cast: toNullableString },
   { key: "EMAIL", cast: toNullableString },
-  { key: "PAX", cast: toNullableNumber },
+  { key: "PAX", cast: toNullableString },
   { key: "ADULT", cast: toNullableNumber },
   { key: "CH/INF", cast: toNullableString },
   { key: "INFO", cast: toNullableString },
@@ -94,6 +92,11 @@ router.post("/", requireAuth, async (req, res) => {
   const missing = required.filter((k) => !String(b[k] ?? "").trim());
   if (missing.length) return res.status(400).json({ error: "Missing required fields", missing });
 
+  const invalidNumericField = getInvalidNumericField(b);
+  if (invalidNumericField) {
+    return res.status(400).json({ error: `${invalidNumericField} must be a valid number.` });
+  }
+
   const availableColumns = await resolveDataColumns();
   const insertCandidates = [
     { key: "THE_DATE", value: b.THE_DATE },
@@ -107,7 +110,7 @@ router.post("/", requireAuth, async (req, res) => {
     { key: "FLY_COMPANY", value: toNullableString(b.FLY_COMPANY) },
     { key: "THE_NAME", value: b.THE_NAME },
     { key: "EMAIL", value: toNullableString(b.EMAIL) },
-    { key: "PAX", value: toNullableNumber(b.PAX) },
+    { key: "PAX", value: toNullableString(b.PAX) },
     { key: "ADULT", value: toNullableNumber(b.ADULT) },
     { key: "CH/INF", value: toNullableString(b["CH/INF"]) },
     { key: "INFO", value: toNullableString(b.INFO) },
@@ -140,6 +143,10 @@ router.put("/:id", requireAuth, async (req, res) => {
   if (!id) return res.status(400).json({ error: "Missing ride id" });
 
   const body = req.body ?? {};
+  const invalidNumericField = getInvalidNumericField(body);
+  if (invalidNumericField) {
+    return res.status(400).json({ error: `${invalidNumericField} must be a valid number.` });
+  }
   const setParts = [];
   const values = [];
   const availableColumns = await resolveDataColumns();

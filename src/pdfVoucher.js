@@ -11,7 +11,7 @@ function pickFirstExisting(paths = []) {
   return null;
 }
 
-const FONT_REGULAR =
+export const FONT_REGULAR =
   pickFirstExisting([
     path.resolve(MODULE_DIR, "../assets/fonts/NotoSans-Regular.ttf"),
     path.resolve(MODULE_DIR, "../assets/fonts/DejaVuSans.ttf"),

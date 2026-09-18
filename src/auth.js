@@ -1,5 +1,6 @@
 import jwt from "jsonwebtoken";
 import { randomBytes, timingSafeEqual } from "node:crypto";
+import { pool } from "./db.js";
 
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
@@ -13,7 +14,7 @@ export function createCsrfToken() {
   return randomBytes(32).toString("base64url");
 }
 
-export function requireAuth(req, res, next) {
+export async function requireAuth(req, res, next) {
   const cookieToken = req.cookies?.token;
   if (!cookieToken) return res.status(401).json({ error: "Not authenticated" });
 
@@ -21,6 +22,18 @@ export function requireAuth(req, res, next) {
     const payload = jwt.verify(cookieToken, process.env.JWT_SECRET);
     if (!payload.csrfToken) {
       return res.status(401).json({ error: "Session renewal required" });
+    }
+    const tokenSessionVersion = Number(payload.sessionVersion ?? 0);
+    if (!Number.isSafeInteger(tokenSessionVersion) || tokenSessionVersion < 0) {
+      return res.status(401).json({ error: "Invalid token" });
+    }
+    const [users] = await pool.query(
+      "SELECT `session_version` AS sessionVersion FROM users WHERE id = ? LIMIT 1",
+      [payload.userId],
+    );
+    const user = users?.[0];
+    if (!user || Number(user.sessionVersion ?? 0) !== tokenSessionVersion) {
+      return res.status(401).json({ error: "Session expired. Please log in again." });
     }
     req.user = payload;
 

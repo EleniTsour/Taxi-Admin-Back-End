@@ -9,6 +9,20 @@ import {
 
 const router = Router();
 
+function sendExportError(res, err, fallback, extra = {}) {
+  const status = Number(err?.status || 500);
+  if (status >= 400 && status < 500) {
+    return res.status(status).json({
+      error: err.message,
+      ...extra,
+      total: err?.total ?? undefined,
+      limit: err?.limit ?? undefined,
+    });
+  }
+  console.error(fallback, err);
+  return res.status(status >= 500 && status <= 599 ? status : 500).json({ error: "Internal server error", ...extra });
+}
+
 router.post("/", requireAuth, async (req, res) => {
   try {
     const job = await createExportJob({
@@ -25,12 +39,7 @@ router.post("/", requireAuth, async (req, res) => {
         : "An export with the same filters is already in progress.",
     });
   } catch (err) {
-    return res.status(Number(err?.status || 500)).json({
-      error: err?.message || "Could not create export job.",
-      total: err?.total ?? undefined,
-      limit: err?.limit ?? undefined,
-      limits: EXPORT_LIMITS,
-    });
+    return sendExportError(res, err, "Could not create export job.", { limits: EXPORT_LIMITS });
   }
 });
 
@@ -46,10 +55,7 @@ router.get("/:id", requireAuth, async (req, res) => {
       limits: EXPORT_LIMITS,
     });
   } catch (err) {
-    return res.status(Number(err?.status || 500)).json({
-      error: err?.message || "Could not load export job.",
-      limits: EXPORT_LIMITS,
-    });
+    return sendExportError(res, err, "Could not load export job.", { limits: EXPORT_LIMITS });
   }
 });
 
@@ -59,9 +65,7 @@ router.get("/:id/download", requireAuth, async (req, res) => {
     res.setHeader("Content-Type", file.mimeType);
     return res.download(file.filePath, file.fileName);
   } catch (err) {
-    return res.status(Number(err?.status || 500)).json({
-      error: err?.message || "Could not download export file.",
-    });
+    return sendExportError(res, err, "Could not download export file.");
   }
 });
 

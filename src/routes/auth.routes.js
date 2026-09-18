@@ -34,7 +34,7 @@ router.post("/login", async (req, res) => {
   const { email, password } = req.body ?? {};
   if (!email || !password) return res.status(400).json({ error: "Missing email/password" });
 
-  const [rows] = await pool.query("SELECT id, email, password_hash, role FROM users WHERE email = ?", [email]);
+  const [rows] = await pool.query("SELECT id, email, password_hash, role, session_version AS sessionVersion FROM users WHERE email = ?", [email]);
   const user = rows?.[0];
   if (!user) return res.status(401).json({ error: "Invalid credentials" });
 
@@ -43,7 +43,7 @@ router.post("/login", async (req, res) => {
 
   const csrfToken = createCsrfToken();
   const token = jwt.sign(
-    { userId: user.id, email: user.email, role: user.role, csrfToken },
+    { userId: user.id, email: user.email, role: user.role, csrfToken, sessionVersion: Number(user.sessionVersion ?? 0) },
     process.env.JWT_SECRET,
     { expiresIn: "7d" }
   );
@@ -98,7 +98,7 @@ router.post("/change-password", requireAuth, async (req, res) => {
   }
 
   const [rows] = await pool.query(
-    "SELECT id, password_hash FROM users WHERE id = ? LIMIT 1",
+    "SELECT id, password_hash, session_version AS sessionVersion FROM users WHERE id = ? LIMIT 1",
     [userId],
   );
   const user = rows?.[0];
@@ -115,9 +115,15 @@ router.post("/change-password", requireAuth, async (req, res) => {
   }
 
   const newHash = await bcrypt.hash(newPassword, 10);
-  await pool.query("UPDATE users SET password_hash = ? WHERE id = ? LIMIT 1", [newHash, userId]);
+  await pool.query(
+    "UPDATE users SET password_hash = ?, session_version = session_version + 1 WHERE id = ? LIMIT 1",
+    [newHash, userId],
+  );
 
-  res.json({ ok: true });
+  const cookieOptions = getCookieOptions();
+  res.clearCookie("token", { httpOnly: cookieOptions.httpOnly, sameSite: cookieOptions.sameSite, secure: cookieOptions.secure });
+  res.clearCookie("csrf_token", { sameSite: cookieOptions.sameSite, secure: cookieOptions.secure });
+  res.json({ ok: true, sessionRevoked: true });
 });
 
 export default router;
