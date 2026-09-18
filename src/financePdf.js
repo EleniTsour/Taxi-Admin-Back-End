@@ -6,16 +6,25 @@ const BODY_COLOR = "#16202A";
 const MUTED_COLOR = "#52616F";
 const ACCENT_COLOR = "#1F6F8B";
 const RULE_COLOR = "#D8E0E7";
-const FINANCE_LOGO_URL = new URL("../../frontend/public/versa-logo.png", import.meta.url);
+export const FINANCE_LOGO_URL = new URL("./assets/versa-logo.png", import.meta.url);
 let financeLogoPromise = null;
 
-// Reuse the existing local application logo and cache it for export jobs.
-async function loadFinanceLogoBuffer() {
+async function readFinanceLogo(logoUrl, readFileFn) {
+  try {
+    return await readFileFn(logoUrl);
+  } catch (error) {
+    // A report must remain available if a deployment has an incomplete asset.
+    console.warn(`Finance PDF logo is unavailable at ${logoUrl.pathname}; generating without it.`, error);
+    return null;
+  }
+}
+
+// The logo is owned by the backend repository and is cached for export jobs.
+// Optional dependencies make this fallback independently testable.
+export function loadFinanceLogoBuffer({ logoUrl = FINANCE_LOGO_URL, readFileFn = readFile } = {}) {
+  if (logoUrl !== FINANCE_LOGO_URL || readFileFn !== readFile) return readFinanceLogo(logoUrl, readFileFn);
   if (!financeLogoPromise) {
-    financeLogoPromise = readFile(FINANCE_LOGO_URL).catch((error) => {
-      financeLogoPromise = null;
-      throw error;
-    });
+    financeLogoPromise = readFinanceLogo(FINANCE_LOGO_URL, readFile);
   }
   return financeLogoPromise;
 }
@@ -163,7 +172,7 @@ export function renderFinancePdf(doc, { rows = [], tourOperator, from, to, inclu
   if (includeTotals) drawTotals(doc, calculateFinanceTotals(rows), y, logoBuffer);
 }
 
-export async function buildFinancePdfBuffer(options) {
-  const logoBuffer = await loadFinanceLogoBuffer();
+export async function buildFinancePdfBuffer(options, logoDependencies) {
+  const logoBuffer = await loadFinanceLogoBuffer(logoDependencies);
   return buildPdfBuffer((doc) => renderFinancePdf(doc, { ...options, logoBuffer }));
 }

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { calculateFinanceTotals, renderFinancePdf } from "../src/financePdf.js";
+import { buildFinancePdfBuffer, calculateFinanceTotals, FINANCE_LOGO_URL, loadFinanceLogoBuffer, renderFinancePdf } from "../src/financePdf.js";
 
 class RecordingPdfDocument {
   constructor({ height = 500 } = {}) {
@@ -35,6 +35,51 @@ class RecordingPdfDocument {
 function textValues(doc) {
   return doc.texts.map((entry) => entry.value).join("\n");
 }
+
+test("Finance PDF loads its logo from the backend-owned asset", async () => {
+  assert.match(FINANCE_LOGO_URL.pathname.replaceAll("\\", "/"), /\/backend\/src\/assets\/versa-logo\.png$/);
+  const logo = await loadFinanceLogoBuffer();
+  assert.ok(Buffer.isBuffer(logo));
+  assert.ok(logo.length > 0);
+});
+
+test("Finance PDF still generates when the backend logo asset is unavailable", async () => {
+  const warnings = [];
+  const originalWarn = console.warn;
+  console.warn = (...args) => warnings.push(args.join(" "));
+  try {
+    const pdf = await buildFinancePdfBuffer({
+      tourOperator: "Alpha Tours",
+      includeTotals: false,
+      rows: [{ date: "2026-09-01", charge: "100.00", payment: "0.00", balance: "100.00", notes: "One row" }],
+    }, {
+      logoUrl: new URL("file:///missing-backend-logo.png"),
+      readFileFn: async () => { const error = new Error("ENOENT"); error.code = "ENOENT"; throw error; },
+    });
+    assert.equal(pdf.subarray(0, 4).toString(), "%PDF");
+    assert.match(warnings.join("\n"), /Finance PDF logo is unavailable/);
+  } finally {
+    console.warn = originalWarn;
+  }
+});
+
+test("Finance PDF builds both single-row and multi-row reports with the backend logo", async () => {
+  const single = await buildFinancePdfBuffer({
+    tourOperator: "Alpha Tours", includeTotals: false,
+    rows: [{ date: "2026-09-01", charge: "100.00", payment: "0.00", balance: "100.00", notes: "One row" }],
+  });
+  const multiple = await buildFinancePdfBuffer({
+    tourOperator: "Alpha Tours",
+    rows: [
+      { date: "2026-09-01", charge: "100.00", payment: "0.00", balance: "100.00", notes: "First row" },
+      { date: "2026-09-02", charge: "0.00", payment: "50.00", balance: "-50.00", notes: "Second row" },
+    ],
+  });
+  for (const pdf of [single, multiple]) {
+    assert.equal(pdf.subarray(0, 4).toString(), "%PDF");
+    assert.ok(pdf.includes(Buffer.from("/Subtype /Image")));
+  }
+});
 
 test("Finance PDF renders compact inline record fields, accented operator, and decimal-safe totals", () => {
   const doc = new RecordingPdfDocument();
