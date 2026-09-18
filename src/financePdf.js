@@ -1,10 +1,24 @@
 import { buildPdfBuffer } from "./exportArtifacts.js";
 import { FONT_BOLD, FONT_REGULAR } from "./pdfVoucher.js";
+import { readFile } from "node:fs/promises";
 
 const BODY_COLOR = "#16202A";
 const MUTED_COLOR = "#52616F";
 const ACCENT_COLOR = "#1F6F8B";
 const RULE_COLOR = "#D8E0E7";
+const FINANCE_LOGO_URL = new URL("../../frontend/public/versa-logo.png", import.meta.url);
+let financeLogoPromise = null;
+
+// Reuse the existing local application logo and cache it for export jobs.
+async function loadFinanceLogoBuffer() {
+  if (!financeLogoPromise) {
+    financeLogoPromise = readFile(FINANCE_LOGO_URL).catch((error) => {
+      financeLogoPromise = null;
+      throw error;
+    });
+  }
+  return financeLogoPromise;
+}
 
 function displayDate(value) {
   const match = String(value ?? "").match(/^(\d{4})-(\d{2})-(\d{2})/);
@@ -47,13 +61,19 @@ function periodDetails({ from, to }) {
   return null;
 }
 
-function drawHeader(doc, { tourOperator, from, to, continuation = false }) {
+function drawHeader(doc, { tourOperator, from, to, continuation = false, logoBuffer = null }) {
   const left = doc.page.margins.left;
   const width = doc.page.width - doc.page.margins.left - doc.page.margins.right;
   let y = doc.page.margins.top;
 
+  const logoWidth = 112;
+  const logoHeight = 42;
+  if (!continuation && logoBuffer) {
+    const logoX = doc.page.width - doc.page.margins.right - logoWidth;
+    doc.image(logoBuffer, logoX, y, { fit: [logoWidth, logoHeight], align: "right", valign: "top" });
+  }
   doc.fillColor(BODY_COLOR).font(FONT_BOLD).fontSize(continuation ? 12 : 20)
-    .text(continuation ? "Finance Report (continued)" : "Finance Report", left, y);
+    .text(continuation ? "Finance Report (continued)" : "Finance Report", left, y, { width: continuation ? width : width - logoWidth - 16 });
   y += continuation ? 22 : 32;
 
   if (!continuation) {
@@ -79,7 +99,7 @@ function drawInlineField(doc, { label, value, left, y, valueColor = BODY_COLOR }
   doc.fillColor(valueColor).font(FONT_REGULAR).fontSize(10).text(` ${value}`);
 }
 
-function drawRecord(doc, row, y) {
+function drawRecord(doc, row, y, logoBuffer) {
   const left = doc.page.margins.left;
   const width = doc.page.width - doc.page.margins.left - doc.page.margins.right;
   const bottom = doc.page.height - doc.page.margins.bottom;
@@ -89,7 +109,7 @@ function drawRecord(doc, row, y) {
 
   if (y + recordHeight > bottom && y > doc.page.margins.top) {
     doc.addPage();
-    y = drawHeader(doc, { continuation: true });
+    y = drawHeader(doc, { continuation: true, logoBuffer });
   }
 
   drawInlineField(doc, { label: "Date", value: displayDate(row.date), left, y });
@@ -111,7 +131,7 @@ function drawRecord(doc, row, y) {
   return y + 16;
 }
 
-function drawTotals(doc, totals, y) {
+function drawTotals(doc, totals, y, logoBuffer) {
   const left = doc.page.margins.left;
   const width = doc.page.width - doc.page.margins.left - doc.page.margins.right;
   const bottom = doc.page.height - doc.page.margins.bottom;
@@ -120,7 +140,7 @@ function drawTotals(doc, totals, y) {
 
   if (y + totalHeight > bottom) {
     doc.addPage();
-    y = drawHeader(doc, { continuation: true });
+    y = drawHeader(doc, { continuation: true, logoBuffer });
   }
 
   doc.strokeColor("#91A4B5").lineWidth(1).moveTo(left, y).lineTo(left + width, y).stroke();
@@ -137,12 +157,13 @@ function drawTotals(doc, totals, y) {
 
 // Used for full filtered reports and the authenticated single-record PDF.
 // The individual-record endpoint deliberately disables aggregate totals.
-export function renderFinancePdf(doc, { rows = [], tourOperator, from, to, includeTotals = true }) {
-  let y = drawHeader(doc, { tourOperator, from, to });
-  for (const row of rows) y = drawRecord(doc, row, y);
-  if (includeTotals) drawTotals(doc, calculateFinanceTotals(rows), y);
+export function renderFinancePdf(doc, { rows = [], tourOperator, from, to, includeTotals = true, logoBuffer = null }) {
+  let y = drawHeader(doc, { tourOperator, from, to, logoBuffer });
+  for (const row of rows) y = drawRecord(doc, row, y, logoBuffer);
+  if (includeTotals) drawTotals(doc, calculateFinanceTotals(rows), y, logoBuffer);
 }
 
-export function buildFinancePdfBuffer(options) {
-  return buildPdfBuffer((doc) => renderFinancePdf(doc, options));
+export async function buildFinancePdfBuffer(options) {
+  const logoBuffer = await loadFinanceLogoBuffer();
+  return buildPdfBuffer((doc) => renderFinancePdf(doc, { ...options, logoBuffer }));
 }

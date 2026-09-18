@@ -129,11 +129,27 @@ export async function fetchFinancePage(query) {
     FROM finance
     ${search.whereSql}
   `;
-  const [countRows] = await pool.query(`SELECT COUNT(*) AS total FROM finance ${search.whereSql}`, search.params);
+  // Keep the count and monetary totals in the same server-side aggregate over
+  // the exact WHERE clause used by the paginated row query. DECIMAL values are
+  // returned as strings by mysql2, so no JavaScript floating-point sum occurs.
+  const [summaryRows] = await pool.query(`
+    SELECT COUNT(*) AS total,
+      CAST(COALESCE(SUM(\`CHARGE\`), 0.00) AS DECIMAL(24,2)) AS totalCharge,
+      CAST(COALESCE(SUM(\`PAYMENT\`), 0.00) AS DECIMAL(24,2)) AS totalPayment,
+      CAST(COALESCE(SUM(\`CHARGE\`) - SUM(\`PAYMENT\`), 0.00) AS DECIMAL(24,2)) AS totalBalance
+    FROM finance
+    ${search.whereSql}
+  `, search.params);
   const [rows] = await pool.query(`${selectSql} ORDER BY ${search.orderBy} LIMIT ? OFFSET ?`, [...search.params, search.pageSize, search.offset]);
+  const summary = summaryRows?.[0] ?? {};
   return {
     rows,
-    total: Number(countRows?.[0]?.total ?? 0),
+    total: Number(summary.total ?? 0),
+    totals: {
+      charge: String(summary.totalCharge ?? "0.00"),
+      payment: String(summary.totalPayment ?? "0.00"),
+      balance: String(summary.totalBalance ?? "0.00"),
+    },
     page: search.page,
     pageSize: search.pageSize,
     sortBy: search.sortBy,

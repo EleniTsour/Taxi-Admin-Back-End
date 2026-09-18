@@ -9,6 +9,7 @@ class RecordingPdfDocument {
     this.pageCount = 1;
     this.color = "";
     this.texts = [];
+    this.images = [];
   }
 
   fillColor(color) { this.color = color; return this; }
@@ -21,6 +22,7 @@ class RecordingPdfDocument {
   stroke() { return this; }
   heightOfString(value) { return Math.max(12, Math.ceil(String(value).length / 55) * 14); }
   addPage() { this.pageCount += 1; this.y = this.page.margins.top; return this; }
+  image(_buffer, x, y, options) { this.images.push({ page: this.pageCount, x, y, options }); return this; }
 
   text(value, x, y) {
     const positionY = typeof y === "number" ? y : (typeof x === "number" ? this.y : this.y);
@@ -73,6 +75,22 @@ test("Finance PDF omits period without date filters and omits totals for an indi
   const output = textValues(doc);
   assert.doesNotMatch(output, /Period:|From:|Until:/);
   assert.doesNotMatch(output, /Totals|Total Charge|Total Payment|Total Balance/);
+});
+
+test("Finance PDF places the logo on the first page only", () => {
+  const doc = new RecordingPdfDocument({ height: 170 });
+  renderFinancePdf(doc, {
+    tourOperator: "Alpha Tours",
+    logoBuffer: Buffer.from("logo"),
+    rows: [
+      { date: "2026-09-01", charge: "100.00", payment: "0.00", balance: "100.00", notes: "A sufficiently long note to move the report forward.".repeat(8) },
+      { date: "2026-09-02", charge: "100.00", payment: "0.00", balance: "100.00", notes: "Second record" },
+    ],
+  });
+
+  assert.ok(doc.pageCount >= 2);
+  assert.deepEqual(doc.images.map((image) => image.page), [1]);
+  assert.equal(doc.images[0].options.fit[0], 112);
 });
 
 test("Finance totals use integer cents for decimal and negative balances", () => {

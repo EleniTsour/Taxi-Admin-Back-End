@@ -68,23 +68,23 @@ export function buildExcelBuffer(rows) {
 }
 
 export function buildFinanceExcelBuffer(rows) {
-  const header = ["Tour Operator", "Date", "Charge", "Payment", "Balance", "Notes"];
+  const header = ["Tour Operator", "Date", "Notes", "Charge", "Payment", "Balance"];
   const data = rows.map((row) => [
     String(row.tourOperator ?? ""),
     new Date(`${String(row.date ?? "")}T00:00:00.000Z`),
+    String(row.notes ?? ""),
     Number(row.charge ?? 0),
     Number(row.payment ?? 0),
     Number(row.balance ?? 0),
-    String(row.notes ?? ""),
   ]);
   const sheet = XLSX.utils.aoa_to_sheet([header, ...data]);
   for (let rowIndex = 2; rowIndex <= data.length + 1; rowIndex += 1) {
     sheet[`B${rowIndex}`].z = "dd/mm/yyyy";
-    sheet[`C${rowIndex}`].z = "€#,##0.00";
     sheet[`D${rowIndex}`].z = "€#,##0.00";
     sheet[`E${rowIndex}`].z = "€#,##0.00";
+    sheet[`F${rowIndex}`].z = "€#,##0.00";
   }
-  sheet["!cols"] = [{ wch: 24 }, { wch: 13 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 60 }];
+  sheet["!cols"] = [{ wch: 24 }, { wch: 13 }, { wch: 60 }, { wch: 14 }, { wch: 14 }, { wch: 14 }];
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, sheet, "Finance");
   return Buffer.from(XLSX.write(workbook, { type: "buffer", bookType: "xlsx", cellDates: true }));

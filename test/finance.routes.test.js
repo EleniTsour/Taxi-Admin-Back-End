@@ -128,7 +128,7 @@ test("searches by Tour Operator with inclusive From and To dates and decimal-saf
   await withMockedDb(async (sql, params = []) => {
     queries.push({ sql, params });
     if (sql.includes("COLUMN_NAME IN")) return [[{ COLUMN_NAME: "A/A" }]];
-    if (sql.includes("COUNT(*) AS total")) return [[{ total: 4 }]];
+    if (sql.includes("COUNT(*) AS total")) return [[{ total: 4, totalCharge: "400.50", totalPayment: "300.25", totalBalance: "100.25" }]];
     if (sql.includes("FROM finance")) return [[
       { id: 42, tourOperator: "Alpha Tours", date: "2026-09-15", charge: "100.00", payment: "60.00", balance: "40.00", notes: null },
       { id: 43, tourOperator: "Alpha Tours", date: "2026-09-15", charge: "100.00", payment: "100.00", balance: "0.00", notes: null },
@@ -141,6 +141,7 @@ test("searches by Tour Operator with inclusive From and To dates and decimal-saf
     assert.equal(response.status, 200);
     const body = await response.json();
     assert.equal(body.total, 4);
+    assert.deepEqual(body.totals, { charge: "400.50", payment: "300.25", balance: "100.25" });
     assert.equal(body.rows[0].tourOperator, "Alpha Tours");
     assert.deepEqual(body.rows.map((row) => row.balance), ["40.00", "0.00", "-20.00", "80.25"]);
   });
@@ -149,6 +150,20 @@ test("searches by Tour Operator with inclusive From and To dates and decimal-saf
   assert.match(countQuery.sql, /`THE_DATE` >= \? AND `THE_DATE` <= \?/);
   assert.deepEqual(countQuery.params, ["Alpha Tours", "2026-09-15", "2026-09-15"]);
   assert.ok(resultQuery);
+});
+
+test("search returns zero decimal-safe totals for an empty filtered result set", async () => {
+  await withMockedDb(async (sql) => {
+    if (sql.includes("COUNT(*) AS total")) return [[{ total: 0, totalCharge: "0.00", totalPayment: "0.00", totalBalance: "0.00" }]];
+    if (sql.includes("FROM finance")) return [[]];
+    throw new Error(`Unexpected query: ${sql}`);
+  }, async () => {
+    const response = await fetch(`${baseUrl}/finance/search?tourOperator=Alpha%20Tours&page=2&pageSize=10&sortBy=PAYMENT&sortDir=asc`, { headers: headers() });
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.total, 0);
+    assert.deepEqual(body.totals, { charge: "0.00", payment: "0.00", balance: "0.00" });
+  });
 });
 
 test("rejects a Date From later than Date To", async () => {
@@ -214,7 +229,9 @@ test("generates an authenticated PDF for one authoritative Finance row", async (
     assert.equal(response.status, 200);
     assert.match(response.headers.get("content-type") ?? "", /^application\/pdf/);
     assert.match(response.headers.get("content-disposition") ?? "", /finance_report_42\.pdf/);
-    assert.equal(Buffer.from(await response.arrayBuffer()).subarray(0, 4).toString(), "%PDF");
+    const pdf = Buffer.from(await response.arrayBuffer());
+    assert.equal(pdf.subarray(0, 4).toString(), "%PDF");
+    assert.ok(pdf.includes(Buffer.from("/Subtype /Image")));
   });
   assert.match(queries[0].sql, /CAST\(`CHARGE` - `PAYMENT` AS DECIMAL\(12,2\)\) AS balance/);
   assert.deepEqual(queries[0].params, ["42"]);
